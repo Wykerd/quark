@@ -1,0 +1,9 @@
+tmp/
+build/
+.idea/
+.vscode/
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
