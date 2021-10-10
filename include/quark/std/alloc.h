@@ -8,10 +8,10 @@ typedef struct qrk_malloc_state_s {
     size_t malloc_count;
     size_t malloc_size;
     size_t malloc_limit;
+	void *opaque;
 #if defined(QRK_MALLOC_DEBUG) && defined(__linux__)
     qrk_hashmap_t pointers;
 #endif
-    void *opaque; 
 } qrk_malloc_state_t;
 
 typedef struct qrk_mallloc_funcs_s {

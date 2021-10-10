@@ -28,7 +28,6 @@ void *qrk_str_resize (qrk_str_t *buf, size_t size)
 
 void *qrk_str_push_back (qrk_str_t *buf, const char *src, size_t len)
 {
-
     if (buf->size < (buf->len + len))
         if (!qrk_str_resize(buf, buf->len + len))
             return NULL;
@@ -99,4 +98,75 @@ void qrk_str_free (qrk_str_t *buf)
     buf->base = NULL;
     buf->size = 0;
     buf->len = 0;
+}
+
+void *qrk_buf_malloc (qrk_buf_t *buf, qrk_malloc_ctx_t *ctx,
+					  size_t memb_size, size_t nmemb) {
+	buf->m_ctx = ctx;
+	buf->memb_size = memb_size;
+	buf->base = qrk_malloc(ctx, buf->memb_size * nmemb);
+	buf->nmemb = 0;
+	buf->size = nmemb;
+	return buf->base;
+}
+
+void *qrk_buf_resize (qrk_buf_t *buf, size_t nmemb) {
+	void *new_ptr = qrk_realloc(buf->m_ctx, buf->base, buf->memb_size * nmemb);
+	if (!new_ptr)
+		return NULL;
+	buf->base = new_ptr;
+	buf->size = nmemb;
+	if (buf->nmemb > buf->size)
+		buf->nmemb = buf->size;
+	return buf->base;
+}
+
+void *qrk_buf_push_back (qrk_buf_t *buf, const void **src, size_t nmemb) {
+	if (buf->size < (buf->nmemb + nmemb))
+		if (!qrk_buf_resize(buf, buf->nmemb + nmemb))
+			return NULL;
+
+	char *sp = buf->base + (buf->nmemb * buf->memb_size);
+
+	for (size_t i = 0; i < nmemb; ++i)
+		memcpy(sp + (i * buf->memb_size), src[i], buf->memb_size);
+
+	buf->nmemb += nmemb;
+
+	return sp;
+}
+
+void *qrk_buf_push_front (qrk_buf_t *buf, const void **src, size_t nmemb) {
+	if (buf->size < (buf->nmemb + nmemb))
+		if (!qrk_buf_resize(buf, buf->nmemb + nmemb))
+			return NULL;
+	for (size_t i = 0; i < buf->nmemb; ++i)
+		memcpy(buf->base + (((buf->nmemb - 1 - i) + nmemb) * buf->memb_size), buf->base + ((buf->nmemb - 1 - i) * buf->memb_size), buf->memb_size);
+
+	for (size_t i = 0; i < nmemb; ++i)
+		memcpy(buf->base + (i * buf->memb_size), src[i], buf->memb_size);
+
+	buf->nmemb += nmemb;
+
+	return buf->base;
+}
+
+void qrk_buf_shift (qrk_buf_t *buf, size_t nmemb)
+{
+	memmove(buf->base, buf->base + (nmemb * buf->memb_size), (buf->nmemb - nmemb) * buf->memb_size);
+	buf->nmemb -= nmemb;
+}
+
+void qrk_buf_free (qrk_buf_t *buf)
+{
+	qrk_free(buf->m_ctx, buf->base);
+	buf->base = NULL;
+	buf->size = 0;
+	buf->nmemb = 0;
+}
+
+void *qrk_buf_get (qrk_buf_t *buf, size_t i) {
+	if (i > buf->nmemb - 1)
+		return NULL;
+	return buf->base + (i * buf->memb_size);
 }

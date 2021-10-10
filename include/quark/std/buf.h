@@ -11,19 +11,20 @@ typedef struct qrk_str_s {
 } qrk_str_t;
 
 typedef struct qrk_buf_s {
-    void **base;
-    size_t len;
+    void *base;
+    size_t nmemb;
     size_t size;
     qrk_malloc_ctx_t *m_ctx;
-    size_t elem_size;
+    size_t memb_size;
 } qrk_buf_t;
 
-void *qrk_buf_malloc (qrk_str_t *buf, qrk_malloc_ctx_t *ctx, size_t initial_size);
-void *qrk_buf_resize (qrk_str_t *buf, size_t nmemb);
-void *qrk_buf_push_back (qrk_str_t *buf, const void **src, size_t nmemb);
-void *qrk_buf_push_front (qrk_str_t *buf, const void **src, size_t nmemb);
-void qrk_buf_shift (qrk_str_t *buf, size_t nmemb);
-void qrk_buf_free (qrk_str_t *buf);
+void *qrk_buf_malloc (qrk_buf_t *buf, qrk_malloc_ctx_t *ctx, size_t memb_size, size_t nmemb);
+void *qrk_buf_resize (qrk_buf_t *buf, size_t nmemb);
+void *qrk_buf_push_back (qrk_buf_t *buf, const void **src, size_t nmemb);
+void *qrk_buf_push_front (qrk_buf_t *buf, const void **src, size_t nmemb);
+void qrk_buf_shift (qrk_buf_t *buf, size_t nmemb);
+void qrk_buf_free (qrk_buf_t *buf);
+void *qrk_buf_get (qrk_buf_t *buf, size_t i);
 
 void *qrk_str_malloc (qrk_str_t *buf, qrk_malloc_ctx_t *ctx, size_t initial_size);
 void *qrk_str_resize (qrk_str_t *buf, size_t size);

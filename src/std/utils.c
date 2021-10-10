@@ -9,7 +9,7 @@
  * License: http://www.cl.cam.ac.uk/~mgk25/short-license.html
  * Available: https://www.cl.cam.ac.uk/~mgk25/ucs/utf8_check.c
  */
-const char *cwr_utf8_check(const char *s, size_t len)
+const char *qrk_utf8_check(const char *s, size_t len)
 {
     size_t i = 0;
     while (i < len)

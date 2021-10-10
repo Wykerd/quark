@@ -235,7 +235,7 @@ void qrk_malloc_ctx_dump_leaks (qrk_malloc_ctx_t *ctx)
     if (ctx->ms.malloc_count > 0)
         printf("Memory leak: %"PRIu64" bytes lost in %"PRIu64" block%c\n",
             (uint64_t)(ctx->ms.malloc_size),
-            (uint64_t)(ctx->ms.malloc_count), ctx->ms.malloc_count > 1 ? 's' : '\0');
+            (uint64_t)(ctx->ms.malloc_count), ctx->ms.malloc_count > 1 ? 's' : ' ');
 #if defined(QRK_MALLOC_DEBUG) && defined(__linux__)
     qrk_hashmap_iterate(&ctx->ms.pointers, qrk__dump_leaks);
 #endif

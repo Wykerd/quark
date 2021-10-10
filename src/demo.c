@@ -10,11 +10,27 @@ int main(int argc, char const *argv[])
 
     qrk_malloc_ctx_new(&mctx);
 
-    void *ptr = qrk_malloc(&mctx, 100);
-    qrk_malloc(&mctx, 100);
-    qrk_malloc(&mctx, 100);
+	qrk_buf_t buf;
+	qrk_buf_malloc(&buf, &mctx, sizeof(int), 1);
+	int number = 1;
+	int *f = &number;
+	int **ff = &f;
+	qrk_buf_push_back(&buf, (const void **) ff, 1);
+	*f = 2;
+	qrk_buf_push_back(&buf, (const void **) ff, 1);
+	*f = 3;
+	qrk_buf_push_back(&buf, (const void **) ff, 1);
+	*f = 4;
+	qrk_buf_push_front(&buf, (const void **) ff, 1);
 
-    qrk_free(&mctx, ptr);
+	printf("%d\n", *(int *)qrk_buf_get(&buf, 0));
+	printf("%d\n", *(int *)qrk_buf_get(&buf, 1));
+	printf("%d\n", *(int *)qrk_buf_get(&buf, 2));
+	printf("%d\n", *(int *)qrk_buf_get(&buf, 3));
+
+	qrk_buf_shift(&buf, 2);
+	printf("ff %d\n", *(int *)qrk_buf_get(&buf, 0));
+	printf("ff %d\n", *(int *)qrk_buf_get(&buf, 1));
 
     qrk_malloc_ctx_dump_leaks(&mctx);
 
