@@ -3,6 +3,13 @@
 
 #include <quark/std/alloc.h>
 
+// Compatible with uv_but_t
+typedef struct qrk_rbuf_s {
+	char *base;
+	size_t len;
+} qrk_rbuf_t;
+
+// Compatible with uv_buf_t
 typedef struct qrk_str_s {
     char *base;
     size_t len;

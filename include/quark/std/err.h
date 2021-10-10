@@ -23,7 +23,8 @@ typedef struct qrk_err_s {
 
 typedef enum qrk_err_impl {
 	QRK_E_OK = 0,
-	QRK_E_OOM
+	QRK_E_OOM,
+	QRK_E_UNREACHABLE
 } qrk_err_impl_t;
 
 typedef enum qrk_err_origin {

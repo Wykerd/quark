@@ -21,7 +21,7 @@ typedef struct qrk_mallloc_funcs_s {
     size_t (*quark_malloc_usable_size)(const void *ptr);
 } qrk_malloc_funcs_t;
 
-#define DEF_QRK_ALLOC_CONTEXT(state)   \
+#define DEF_QRK_ALLOC_CONTEXT(state)   	\
     {                                   \
         qrk_malloc_funcs_t mf;          \
         state ms;                       \
@@ -30,6 +30,9 @@ typedef struct qrk_mallloc_funcs_s {
 struct qrk_malloc_ctx_s 
     DEF_QRK_ALLOC_CONTEXT(qrk_malloc_state_t) 
 ;
+
+#define QRK_MEMORY_CONTEXT_FIELDS		\
+	qrk_malloc_ctx_t *m_ctx;
 
 void qrk_malloc_ctx_new_ex (qrk_malloc_ctx_t *ctx, const qrk_malloc_funcs_t *mf);
 void qrk_malloc_ctx_new (qrk_malloc_ctx_t *ctx);

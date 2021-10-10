@@ -9,7 +9,8 @@ const char *qrk__err_str_get_uv (qrk_err_t *err) {
 const char *qrk_err_str_get_impl (qrk_err_t *err) {
 	static const char *err_str[] = {
 		"ok",
-		"out of memory"
+		"out of memory",
+		"unreachable code reached"
 	};
 	return err_str[err->code];
 }

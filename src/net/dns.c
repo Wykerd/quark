@@ -1,6 +1,7 @@
 #include <quark/net/dns.h>
 #include <netdb.h>
 #include <string.h>
+#include <stdlib.h>
 
 int qrk_dns_is_numeric_host_af (const char *hostname, int family) 
 {
@@ -62,6 +63,46 @@ cleanup:
 
 void qrk_dns_getaddrinfo (qrk_loop_t *loop, const char *hostname, const char *port, qrk_getaddrinfo_cb callback)
 {
+	int r;
+	int n = qrk_dns_is_numeric_host_v(hostname);
+	if (n)
+	{
+		switch (n)
+		{
+			case 4:
+			{
+				struct sockaddr_in dst;
+				r = uv_ip4_addr(hostname, atoi(port), &dst);
+				if (!r)
+					callback(loop, NULL, (struct sockaddr *)&dst);
+			}
+			break;
+
+			case 6:
+			{
+				struct sockaddr_in6 dst;
+				r = uv_ip6_addr(hostname, atoi(port), &dst);
+				if (!r)
+					callback(loop, NULL, (struct sockaddr *)&dst);
+			}
+			break;
+
+			default:
+			{
+				qrk_err_t err = {
+					.code = QRK_E_UNREACHABLE,
+					.origin = QRK_EO_IMPL,
+					.target_type = loop->type,
+					.target = loop
+				};
+				callback(loop, &err, NULL);
+				return;
+			}
+		}
+
+		goto cleanup;
+	};
+
 	qrk_getaddrinfo_t *ctx = qrk_malloc(loop->m_ctx, sizeof(qrk_getaddrinfo_t));
 	if (ctx == NULL)
 	{
@@ -81,14 +122,15 @@ void qrk_dns_getaddrinfo (qrk_loop_t *loop, const char *hostname, const char *po
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	int r = uv_getaddrinfo(
+	r = uv_getaddrinfo(
 		ctx->loop->loop,
 		&ctx->req,
 		qrk__dns_getaddrinfo_cb,
 		hostname, port, &hints
 	);
 
-	if (r != 0)
+cleanup:
+	if (unlikely(r != 0))
 	{
 		qrk_err_t err = {
 			.code = r,
@@ -97,5 +139,6 @@ void qrk_dns_getaddrinfo (qrk_loop_t *loop, const char *hostname, const char *po
 			.target = loop
 		};
 		callback(loop, &err, NULL);
+		qrk_free(loop->m_ctx, ctx);
 	}
 }
