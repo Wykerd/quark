@@ -1,8 +1,23 @@
 #include <quark/std/alloc.h>
-#include <quark/std/buf.h>
+#include <quark/std/stream.h>
+#include <quark/net/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void connected(qrk_tcp_t *tcp) {
+    printf("connected\n");
+    qrk_tcp_read_start(tcp);
+    qrk_rbuf_t buf = {
+            .base = "GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n",
+            .len = sizeof("GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n") - 1
+    };
+    tcp->write(tcp, &buf);
+}
+
+void reading(qrk_tcp_t *tcp, qrk_rbuf_t *read) {
+    fwrite(read->base, 1, read->len, stdout);
+}
 
 int main(int argc, char const *argv[])
 {
@@ -10,27 +25,15 @@ int main(int argc, char const *argv[])
 
     qrk_malloc_ctx_new(&mctx);
 
-	qrk_buf_t buf;
-	qrk_buf_malloc(&buf, &mctx, sizeof(int), 1);
-	int number = 1;
-	int *f = &number;
-	int **ff = &f;
-	qrk_buf_push_back(&buf, (const void **) ff, 1);
-	*f = 2;
-	qrk_buf_push_back(&buf, (const void **) ff, 1);
-	*f = 3;
-	qrk_buf_push_back(&buf, (const void **) ff, 1);
-	*f = 4;
-	qrk_buf_push_front(&buf, (const void **) ff, 1);
+    qrk_loop_t loop = qrk_loop_def(&mctx);
 
-	printf("%d\n", *(int *)qrk_buf_get(&buf, 0));
-	printf("%d\n", *(int *)qrk_buf_get(&buf, 1));
-	printf("%d\n", *(int *)qrk_buf_get(&buf, 2));
-	printf("%d\n", *(int *)qrk_buf_get(&buf, 3));
+    qrk_tcp_t tcp;
+    qrk_tcp_init(&tcp, &loop);
+    tcp.on_connect = connected;
+    tcp.on_read = reading;
+    qrk_tcp_connect_host(&tcp, "www.example.com", "80");
 
-	qrk_buf_shift(&buf, 2);
-	printf("ff %d\n", *(int *)qrk_buf_get(&buf, 0));
-	printf("ff %d\n", *(int *)qrk_buf_get(&buf, 1));
+    qrk_start(&loop);
 
     qrk_malloc_ctx_dump_leaks(&mctx);
 

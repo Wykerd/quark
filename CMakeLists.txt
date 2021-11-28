@@ -31,6 +31,13 @@ target_include_directories(quarkstd PUBLIC
     ${OPENSSL_INCLUDE_DIR}
 )
 
+target_link_libraries(quarkstd PUBLIC
+        uv_a
+        OpenSSL::SSL
+        OpenSSL::Crypto
+)
+
+
 if (QRK_BUILD_NET)
     target_link_libraries(quarkstd PUBLIC
         OpenSSL::SSL
@@ -76,6 +83,6 @@ target_include_directories(quarktest PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include 
 )
 
-target_link_libraries(quarktest PUBLIC quarkstd)
+target_link_libraries(quarktest PUBLIC quarkstd quarknet)
 
 set_target_properties(quarktest PROPERTIES ENABLE_EXPORTS 1)

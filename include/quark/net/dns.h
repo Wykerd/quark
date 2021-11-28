@@ -12,5 +12,6 @@ int qrk_dns_is_numeric_host_v4 (const char *hostname);
 int qrk_dns_is_numeric_host_v (const char *hostname);
 int qrk_dns_is_numeric_host (const char *hostname);
 void qrk_dns_getaddrinfo (qrk_loop_t *loop, const char *hostname, const char *port, qrk_getaddrinfo_cb callback);
+// TODO: add getnameinfo
 
 #endif
