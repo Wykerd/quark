@@ -19,7 +19,7 @@
 #include <openssl/ssl.h>
 #include <openssl/bio.h>
 
-#define qrk_USE_OPENSSL_DEFAULT_STORE 0
+#define QRK_USE_OPENSSL_DEFAULT_STORE 0
 
 typedef struct qrk_secure_ctx_s qrk_secure_ctx_t;
 

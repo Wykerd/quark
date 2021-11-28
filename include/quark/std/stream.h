@@ -21,7 +21,7 @@ typedef void (*qrk_stream_write)(qrk_stream_t *stream, qrk_rbuf_t *buf);
     qrk_stream_cb on_write;         \
 	qrk_stream_read_cb on_read; 	\
 	qrk_stream_write write;         \
-    void *data;
+    qrk_stream_t *child;
 
 struct qrk_stream_s {
 	QRK_MEMORY_CONTEXT_FIELDS

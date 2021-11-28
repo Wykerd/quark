@@ -3,13 +3,12 @@
 #include <string.h>
 
 #include <quark/no_malloc.h>
-
 int qrk_crypto_no_password_cb (char* buf, int size, int rwflag, void* u) {
     return 0;
 }
 
 int qrk_crypto_password_cb (char* buf, int size, int rwflag, void* u) {
-    const qrk_rbuf_t * passphrase = u;
+    const qrk_rbuf_t* passphrase = u;
 
     if (passphrase != NULL) {
         size_t buflen = size;
@@ -26,7 +25,7 @@ int qrk_crypto_password_cb (char* buf, int size, int rwflag, void* u) {
 };
 
 static const char* const root_certs[] = {
-#include "quark//crypto/root_certs.h"
+#include "quark/crypto/root_certs.h"
 };
 
 #define root_certs_len (sizeof(root_certs) / sizeof(char*))
@@ -136,7 +135,7 @@ X509_STORE* qrk_sec_ctx_new_root_cert_store (qrk_malloc_ctx_t *ctx, int use_open
 
 qrk_err_impl_t qrk_sec_ctx_add_root_certs (qrk_secure_ctx_t *ctx) {
     if (root_cert_store == NULL) {
-        root_cert_store = qrk_sec_ctx_new_root_cert_store(ctx->m_ctx, qrk_USE_OPENSSL_DEFAULT_STORE);
+        root_cert_store = qrk_sec_ctx_new_root_cert_store(ctx->m_ctx, QRK_USE_OPENSSL_DEFAULT_STORE);
     };
 
     if (root_cert_store == NULL)
@@ -189,7 +188,7 @@ unsigned long qrk_sec_ctx_add_cacert (qrk_secure_ctx_t *ctx, BIO *bio) {
     X509* x509;
     while ((x509 = PEM_read_bio_X509_AUX(bio, NULL, qrk_crypto_no_password_cb, NULL))) {
         if (cert_store == root_cert_store) {
-            cert_store = qrk_sec_ctx_new_root_cert_store(ctx->m_ctx, qrk_USE_OPENSSL_DEFAULT_STORE);
+            cert_store = qrk_sec_ctx_new_root_cert_store(ctx->m_ctx, QRK_USE_OPENSSL_DEFAULT_STORE);
             if (cert_store == NULL)
                 return ERR_get_error();
             SSL_CTX_set_cert_store(ctx->ssl_ctx, cert_store);
@@ -213,7 +212,7 @@ unsigned long qrk_sec_ctx_add_crl (qrk_secure_ctx_t *ctx, BIO *bio) {
     X509_STORE* cert_store = SSL_CTX_get_cert_store(ctx->ssl_ctx);
 
     if (cert_store == root_cert_store) {
-        cert_store = qrk_sec_ctx_new_root_cert_store(ctx->m_ctx, qrk_USE_OPENSSL_DEFAULT_STORE);
+        cert_store = qrk_sec_ctx_new_root_cert_store(ctx->m_ctx, QRK_USE_OPENSSL_DEFAULT_STORE);
         if (cert_store == NULL)
             return ERR_get_error();
         SSL_CTX_set_cert_store(ctx->ssl_ctx, cert_store);

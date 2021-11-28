@@ -263,7 +263,12 @@ static void qrk__tcp_read_cb (uv_stream_t *handle, ssize_t nread, const uv_buf_t
     if (nread > 0)
     {
         if (tcp->on_read)
-            tcp->on_read(tcp,(qrk_rbuf_t *)buf);
+        {
+            qrk_rbuf_t rbuf = {
+                    buf->base, nread
+            };
+            tcp->on_read(tcp, &rbuf);
+        }
     }
     else
     {

@@ -11,8 +11,8 @@ struct qrk_tcp_s {
     QRK_ERR_FIELDS
     QRK_LOOP_HANDLE_FIELD
     QRK_STREAM_FIELDS
-    uv_tcp_t handle;
     qrk_stream_cb on_close;
+    uv_tcp_t handle;
     qrk_stream_cb on_connect;
     qrk_stream_cb on_connection;
 };
