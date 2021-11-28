@@ -8,6 +8,7 @@ option(BUILD_SHARED_LIBS "Build shared libraries (rather than static ones)" ON)
 option(MEMLEAK_STACKTRACES "Include stack traces for memory leaks on linux systems" OFF)
 # TODO: define
 option(QRK_BUILD_NET "Build the networking libraries" ON)
+option(QRK_BUILD_CRYPTO "Build the cryptography libraries" ON)
 
 add_subdirectory(deps/libuv)
 find_package(OpenSSL REQUIRED)
@@ -51,6 +52,29 @@ if (UNIX AND NOT APPLE)
     endif()
 endif()
 
+if (QRK_BUILD_CRYPTO)
+    add_library(quarkcrypto
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto/bio.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto/context.c
+            )
+
+    set_target_properties(quarkcrypto PROPERTIES
+            C_STANDARD 11
+            C_STANDARD_REQUIRED ON
+            )
+
+    target_include_directories(quarkcrypto PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${OPENSSL_INCLUDE_DIR}
+            )
+
+    target_link_libraries(quarkcrypto PUBLIC
+            quarkstd
+            OpenSSL::SSL
+            OpenSSL::Crypto
+            )
+endif()
+
 if (QRK_BUILD_NET)
     add_library(quarknet
         ${CMAKE_CURRENT_SOURCE_DIR}/src/net/dns.c
@@ -71,6 +95,7 @@ if (QRK_BUILD_NET)
 
     target_link_libraries(quarknet PUBLIC
         quarkstd
+        quarkcrypto
         uv_a
     )
 endif()
@@ -83,6 +108,6 @@ target_include_directories(quarktest PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include 
 )
 
-target_link_libraries(quarktest PUBLIC quarkstd quarknet)
+target_link_libraries(quarktest PUBLIC quarkstd quarknet quarkcrypto)
 
 set_target_properties(quarktest PROPERTIES ENABLE_EXPORTS 1)

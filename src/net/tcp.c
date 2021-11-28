@@ -1,6 +1,7 @@
 #include <quark/net/tcp.h>
 #include <quark/net/dns.h>
 #include <stdlib.h>
+#include <quark/no_malloc.h>
 
 static void qrk__tcp_write_cb(uv_write_t *req, int status)
 {
