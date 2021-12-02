@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <quark/std/buf.h>
 
 #define STRINGIFY_DETAIL(x) #x
 #define STRINGIFY(x) STRINGIFY_DETAIL(x)
@@ -45,5 +46,37 @@
  * Quickly check whether a string is utf-8
  */
 const char *qrk_utf8_check(const char *s, size_t len);
+
+#define UTF8_ACCEPT 0
+#define UTF8_REJECT 12
+
+/**
+ * Decode UTF-8 code points
+ * @author Bjoern Hoehrmann
+ * @copyright http://bjoern.hoehrmann.de/utf-8/decoder/dfa/
+ * @example
+ * void
+ * printCodePoints(uint8_t* s) {
+ *  uint32_t codepoint;
+ *  uint32_t state = 0;
+ *
+ *  for (; *s; ++s)
+ *    if (!decode(&state, &codepoint, *s))
+ *      printf("U+%04X\n", codepoint);
+
+ *  if (state != UTF8_ACCEPT)
+ *    printf("The string is not well-formed\n");
+ *
+ * }
+ * @param state
+ * @param codep
+ * @param byte
+ * @return returns the value of the next state (UTF8_ACCEPT or UTF8_REJECT)
+ */
+uint32_t qrk_utf8_decode (uint32_t* state, uint32_t* codep, uint32_t byte);
+
+int qrk_utf8_isascii (const char *s);
+
+int qrk_infra_split_strict_static (qrk_rbuf_t *string, uint32_t delimiter, size_t *tokens, size_t max_tokens);
 
 #endif

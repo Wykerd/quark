@@ -1,5 +1,6 @@
 #include <quark/net/tcp.h>
 #include <quark/net/dns.h>
+#include <quark/std/utils.h>
 #include <stdlib.h>
 #include <quark/no_malloc.h>
 

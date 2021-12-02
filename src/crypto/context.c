@@ -1,6 +1,7 @@
 #include "quark/crypto/context.h"
 #include "quark/crypto/bio.h"
 #include <string.h>
+#include <quark/std/utils.h>
 
 #include <quark/no_malloc.h>
 int qrk_crypto_no_password_cb (char* buf, int size, int rwflag, void* u) {

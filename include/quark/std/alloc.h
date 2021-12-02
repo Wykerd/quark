@@ -1,7 +1,6 @@
 #ifndef QRK_ALLOC_H
 #define QRK_ALLOC_H
 
-#include <quark/std/utils.h>
 #include <quark/std/hashmap.h>
 
 typedef struct qrk_malloc_state_s {

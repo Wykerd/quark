@@ -1,4 +1,5 @@
 #include <quark/std/alloc.h>
+#include <quark/std/utils.h>
 
 #include <stdlib.h>
 #include <string.h>

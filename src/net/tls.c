@@ -4,8 +4,8 @@ static
 int qrk__tls_init_intr(qrk_tls_t *tls, qrk_stream_t *stream) {
     tls->type = QRK_ET_TLS;
     tls->stream = stream;
-    tls->write = qrk_tls_write;
-    tls->stream->child = tls;
+    tls->write = (qrk_stream_write) qrk_tls_write;
+    tls->stream->child = (qrk_stream_t *) tls;
     tls->stream->on_read = qrk_tls_read_underlying;
 
     if (!qrk_str_malloc(&tls->enc_buf, tls->m_ctx, QRK_SSL_IO_BUF_SIZE))
@@ -26,16 +26,16 @@ int qrk_tls_init (qrk_tls_t* tls, qrk_stream_t* stream)
     unsigned long r;
     r = qrk_sec_ctx_init(&tls->sec_ctx, stream->m_ctx, TLS_method(), 0, 0);
     if (r)
-        return r;
+        return 1;
     r = qrk_sec_ctx_set_cipher_suites(&tls->sec_ctx, QRK_SSL_DEFAULT_CIPHER_SUITES);
     if (r)
-        return r;
+        return 1;
     r = qrk_sec_ctx_set_ciphers(&tls->sec_ctx, QRK_SSL_DEFAULT_CIPHER_LISTS);
     if (r)
-        return r;
+        return 1;
     r = qrk_sec_ctx_add_root_certs(&tls->sec_ctx);
     if (r)
-        return r;
+        return 1;
 
     return qrk__tls_init_intr(tls, stream);
 }
@@ -58,7 +58,7 @@ static int qrk__tls_flush_wbio (qrk_tls_t *tls)
         r = BIO_read(tls->wbio, buf, sizeof(buf));
         if (r > 0)
         {
-            qrk_str_t bf = { buf, r };
+            qrk_rbuf_t bf = { buf, r };
             tls->stream->write(tls->stream, &bf);
         }
         else if (!BIO_should_retry(tls->wbio))
@@ -70,7 +70,7 @@ static int qrk__tls_flush_wbio (qrk_tls_t *tls)
                 .target_type = tls->type
             };
             qrk_err_emit(&err);
-            return err.code;
+            return 1;
         }
     } while (r > 0);
 
@@ -148,14 +148,14 @@ int qrk__tls_handshake (qrk_tls_t *tls)
             .target = tls
         };
         qrk_err_emit(&err);
-        return err.code;
+        return 1;
     }
     return 0;
 }
 
 void qrk_tls_read_underlying (qrk_stream_t *stream, qrk_rbuf_t *rbuf)
 {
-    qrk_tls_t *tls = stream->child;
+    qrk_tls_t *tls = (qrk_tls_t *) stream->child;
     char buf[QRK_SSL_IO_BUF_SIZE];
     int r, status;
     size_t len = rbuf->len;
@@ -198,7 +198,7 @@ void qrk_tls_read_underlying (qrk_stream_t *stream, qrk_rbuf_t *rbuf)
                     qrk_rbuf_t obuf = {
                         buf, r
                     };
-                    tls->on_read(tls, &obuf);
+                    tls->on_read((qrk_stream_t *) tls, &obuf);
                 }
             }
             else if (r < 0)
@@ -210,7 +210,7 @@ void qrk_tls_read_underlying (qrk_stream_t *stream, qrk_rbuf_t *rbuf)
         {
             /* Shut down */
             if (tls->on_close)
-                tls->on_close(tls);
+                tls->on_close((qrk_stream_t *) tls);
 
             return;
         }
@@ -262,7 +262,7 @@ int qrk_tls_connect_with_sni (qrk_tls_t *tls, const char *host)
             .target_type = tls->type
         };
         qrk_err_emit(&err);
-        return err.code;
+        return 1;
     };
     return qrk__tls_handshake(tls);
 }
@@ -283,6 +283,11 @@ int qrk_tls_shutdown (qrk_tls_t *tls)
         r = qrk__tls_flush_wbio(tls);
         if (r)
             return r;
+    }
+    else
+    {
+        if (tls->on_close)
+            tls->on_close((qrk_stream_t *) tls);
     }
 
     return !((status == 0) || (status == SSL_ERROR_WANT_WRITE) || (status == SSL_ERROR_WANT_READ));
