@@ -82,3 +82,85 @@ const char *qrk_utf8_check(const char *s, size_t len)
 
     return NULL;
 }
+
+// Copyright (c) 2008-2010 Bjoern Hoehrmann <bjoern@hoehrmann.de>
+// See http://bjoern.hoehrmann.de/utf-8/decoder/dfa/ for details.
+
+static const uint8_t utf8d[] = {
+        // The first part of the table maps bytes to character classes that
+        // to reduce the size of the transition table and create bitmasks.
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+        7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+        8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+        10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+
+        // The second part is a transition table that maps a combination
+        // of a state of the automaton and a character class to a state.
+        0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
+        12, 0,12,12,12,12,12, 0,12, 0,12,12, 12,24,12,12,12,12,12,24,12,24,12,12,
+        12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+        12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+        12,36,12,12,12,12,12,12,12,12,12,12,
+};
+
+uint32_t qrk_utf8_decode(uint32_t* state, uint32_t* codep, uint32_t byte) {
+    uint32_t type = utf8d[byte];
+
+    *codep = (*state != UTF8_ACCEPT) ?
+             (byte & 0x3fu) | (*codep << 6) :
+             (0xff >> type) & (byte);
+
+    *state = utf8d[256 + *state + type];
+    return *state;
+}
+
+int qrk_utf8_isascii (const char *s)
+{
+    uint32_t codepoint;
+    uint32_t state = 0;
+
+    for (; *s; ++s)
+        if (!qrk_utf8_decode(&state, &codepoint, *s))
+            if (codepoint > 127)
+                return 1;
+
+    if (state != UTF8_ACCEPT)
+        return 2;
+
+    return 0;
+}
+
+int qrk_infra_split_strict_static (qrk_rbuf_t *string, uint32_t delimiter, size_t *tokens, size_t max_tokens)
+{
+    const char *s = string->base;
+    const char *end = string->base + string->len;
+    uint32_t codepoint;
+    uint32_t state = 0;
+    int token = 0;
+
+    for (; *s; ++s)
+        if (s >= end)
+        {
+            break;
+        }
+        else if (!qrk_utf8_decode(&state, &codepoint, *s))
+            if (codepoint == delimiter)
+            {
+                if (++token > max_tokens)
+                    return -1;
+                tokens[token - 1] = s - string->base; // index of delimiter
+            }
+
+    if (++token > max_tokens)
+        return -1;
+    tokens[token - 1] = -1;
+
+    if (state != UTF8_ACCEPT)
+        return -1;
+
+    return token;
+}
