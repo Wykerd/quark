@@ -94,7 +94,9 @@ void qrk_str_shift (qrk_str_t *buf, size_t len)
 
 void qrk_str_free (qrk_str_t *buf)
 {
-    qrk_free(buf->m_ctx, buf->base);
+    if (buf->base)
+        qrk_free(buf->m_ctx, buf->base);
+
     buf->base = NULL;
     buf->size = 0;
     buf->len = 0;
@@ -159,7 +161,8 @@ void qrk_buf_shift (qrk_buf_t *buf, size_t nmemb)
 
 void qrk_buf_free (qrk_buf_t *buf)
 {
-	qrk_free(buf->m_ctx, buf->base);
+    if (buf->base)
+	    qrk_free(buf->m_ctx, buf->base);
 	buf->base = NULL;
 	buf->size = 0;
 	buf->nmemb = 0;

@@ -193,7 +193,54 @@ const uint8_t FORBIDDEN_HOST_CODE_POINT[256] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
-void qrk_url_percent_decode (qrk_str_t *dest, qrk_rbuf_t *src)
+const struct {
+    const char *key;
+    size_t keylen;
+    int port;
+} SPECIAL_SCHEME[6] = {
+    {
+        "ftp", 3, 21
+    },
+    {
+        "file", 4, -1
+    },
+    {
+        "http", 4, 80
+    },
+    {
+        "https", 5, 443
+    },
+    {
+        "ws", 2, 80
+    },
+    {
+        "wss", 3, 443
+    }
+};
+
+static inline
+int qrk_url_scheme_is_special (qrk_rbuf_t *scheme)
+{
+    for (int i = 0; i < 6; i++)
+        if ((SPECIAL_SCHEME[i].keylen == scheme->len) &&
+            !memcmp(scheme->base, SPECIAL_SCHEME[i].key, SPECIAL_SCHEME[i].keylen))
+            return 1;
+
+    return 0;
+}
+
+static inline
+int qrk_url_port_is_default (qrk_rbuf_t *scheme, int port)
+{
+    for (int i = 0; i < 6; i++)
+        if ((SPECIAL_SCHEME[i].keylen == scheme->len) &&
+            !memcmp(scheme->base, SPECIAL_SCHEME[i].key, SPECIAL_SCHEME[i].keylen))
+            return port == SPECIAL_SCHEME[i].port;
+
+    return 0;
+}
+
+int qrk_url_percent_decode (qrk_str_t *dest, qrk_rbuf_t *src)
 {
     char a, b, ch;
     for (size_t i = 0; i < src->len; i++)
@@ -212,19 +259,31 @@ void qrk_url_percent_decode (qrk_str_t *dest, qrk_rbuf_t *src)
             qrk_str_push_back(dest, &ch, 1);
         }
         else
-            qrk_str_push_back(dest, &src->base[i], 1);
+            if (!qrk_str_push_back(dest, &src->base[i], 1))
+                return 1;
     }
+    return 0;
 }
 
-void qrk_url_percent_encode (qrk_str_t *dest, qrk_rbuf_t *src, const uint8_t *set)
+int qrk_url_percent_encode2 (qrk_str_t *dest, const char *src, size_t len, const uint8_t *set)
 {
-    for (size_t i = 0; i < src->len; i++)
+    for (size_t i = 0; i < len; i++)
     {
-        if (set[src->base[i]])
-            qrk_str_push_back(dest, PERCENT_ENCODING + src->base[i] * 4, 3);
+        if (set[src[i]])
+        {
+            if (!qrk_str_push_back(dest, PERCENT_ENCODING + src[i] * 4, 3))
+                return 1;
+        }
         else
-            qrk_str_push_back(dest, &src->base[i], 1);
+        if (!qrk_str_push_back(dest, &src[i], 1))
+            return 1;
     }
+    return 0;
+}
+
+int qrk_url_percent_encode (qrk_str_t *dest, qrk_rbuf_t *src, const uint8_t *set)
+{
+    return qrk_url_percent_encode2(dest, src->base, src->len, set);
 }
 
 int qrk_url_domain_to_ascii (qrk_str_t *dest, qrk_rbuf_t *src, int be_strict)
@@ -419,6 +478,8 @@ int qrk_url_host_ipv4_parse (uint32_t *dest, qrk_rbuf_t *src, int *validation_er
 
         tokens--; // exclude the empty string
     }
+
+    tokens++; // add the eol token
 
     uint32_t numbers[4] = {0};
 
@@ -631,6 +692,7 @@ int qrk_url_host_opaque_parse (qrk_str_t *dest, qrk_rbuf_t *src, int *validation
 {
     *validation_error = 0;
 
+    // TODO: we might want to add these validation checks in the future
     // XXX: we do not validate that %-encoded characters are valid.
     // XXX: we do not validate that characters are URL code points.
     for (size_t i = 0; i < src->len; i++)
@@ -640,9 +702,7 @@ int qrk_url_host_opaque_parse (qrk_str_t *dest, qrk_rbuf_t *src, int *validation
             return 1;
         }
 
-    qrk_url_percent_encode(dest, src, C0_CONTROL_PERCENT_ENCODE_SET);
-
-    return 0;
+    return qrk_url_percent_encode(dest, src, C0_CONTROL_PERCENT_ENCODE_SET);
 }
 
 // TODO: good error codes
@@ -659,16 +719,20 @@ int qrk_url_host_parse (qrk_url_host_t *dest, qrk_rbuf_t *src, int is_not_specia
         }; // remove leading [ and trailing ]
         dest->type = QRK_URL_HOST_IPV6;
         return qrk_url_host_ipv6_parse(dest->ipv6, &tsrc, validation_error);
-    };
+    }
     if (is_not_special)
     {
         dest->type = QRK_URL_HOST_OPAQUE;
-        return qrk_url_host_opaque_parse(&dest->str, src, validation_error);
+        int r = qrk_url_host_opaque_parse(&dest->str, src, validation_error);
+        if (dest->str.len == 0)
+            dest->type = QRK_URL_HOST_EMPTY;
+        return r;
     }
     qrk_str_t domain;
     if (qrk_str_malloc(&domain, dest->str.m_ctx, src->len) == NULL)
         return 1;
-    qrk_url_percent_decode(&domain, src);
+    if (qrk_url_percent_decode(&domain, src))
+        goto fail1;
     qrk_str_t asciiDomain;
     if (qrk_str_malloc(&asciiDomain, dest->str.m_ctx, domain.len) == NULL)
         goto fail1;
@@ -698,6 +762,9 @@ int qrk_url_host_parse (qrk_url_host_t *dest, qrk_rbuf_t *src, int is_not_specia
     if (qrk_str_push_back(&dest->str, asciiDomain.base, asciiDomain.len) == NULL)
         goto fail;
 
+    if (asciiDomain.len == 0)
+        dest->type = QRK_URL_HOST_EMPTY;
+
     qrk_str_free(&asciiDomain);
     qrk_str_free(&domain);
     return 0;
@@ -706,4 +773,1213 @@ fail:
 fail1:
     qrk_str_free(&domain);
     return 1;
+}
+
+int qrk_url_host_serialize (qrk_str_t *dest, qrk_url_host_t *src)
+{
+    dest->len = 0;
+
+    switch (src->type)
+    {
+        case QRK_URL_HOST_IPV4:
+        {
+            uint32_t n = src->ipv4;
+            for (int i = 0; i < 3; i++)
+            {
+                qrk_str_printf(dest, "%d.", n % 256);
+                n /= 256;
+            }
+            qrk_str_printf(dest, "%d", n % 256);
+        }
+        break;
+
+        case QRK_URL_HOST_IPV6:
+        {
+            qrk_str_push_back(dest, "[", 1);
+            // find the longest sequence of 0s
+            uint16_t *start = src->ipv6;
+            uint16_t *end = src->ipv6 + 8;
+            uint16_t *compress = NULL;
+
+            uint16_t *current = NULL;
+            unsigned counter = 0, longest = 1;
+
+            while (start < end)
+            {
+                if (*start == 0)
+                {
+                    if (current == NULL)
+                        current = start;
+                    counter++;
+                }
+                else
+                {
+                    if (counter > longest)
+                    {
+                        longest = counter;
+                        compress = current;
+                    }
+                    current = NULL;
+                    counter = 0;
+                }
+                start++;
+            }
+
+            if (counter > longest)
+                compress = current;
+
+
+            int ignore0 = 0;
+
+            for (int i = 0; i < 8; i++)
+            {
+                if (ignore0 && src->ipv6[i] == 0)
+                    continue;
+                ignore0 = 0;
+                if (compress == src->ipv6 + i)
+                {
+                    if (i == 0)
+                        qrk_str_push_back(dest, "::", 2);
+                    else
+                        qrk_str_push_back(dest, ":", 1);
+                    ignore0 = 1;
+                    continue;
+                }
+                qrk_str_printf(dest, "%x", src->ipv6[i]);
+                if (i != 7)
+                    qrk_str_push_back(dest, ":", 1);
+            }
+
+            qrk_str_push_back(dest, "]", 1);
+        }
+        break;
+
+        case QRK_URL_HOST_OPAQUE:
+        case QRK_URL_HOST_DOMAIN:
+        {
+            qrk_str_push_back(dest, src->str.base, src->str.len);
+        }
+        break;
+
+        default:
+            return 1;
+    }
+
+    return 0;
+}
+
+int qrk_url_host_init (qrk_url_host_t *host, qrk_malloc_ctx_t *ctx)
+{
+    memset(host, 0, sizeof(qrk_url_host_t));
+    return qrk_str_malloc(&host->str, ctx, 64) == NULL;
+}
+
+void qrk_url_host_free (qrk_url_host_t *host)
+{
+    qrk_str_free(&host->str);
+}
+
+int qrk_url_path_shorten (qrk_url_t *url)
+{
+    if (url->flags & QRK_URL_FLAG_PATH_IS_OPAQUE)
+        return 1;
+
+    if ((url->flags & QRK_URL_FLAG_IS_FILE) && url->path.nmemb == 1)
+    {
+        qrk_str_t *str = qrk_buf_get(&url->path, 0);
+        if (str->len == 2 && isalpha(str->base[0]) && str->base[1] == ':')
+            return 0;
+    }
+
+    if (url->path.nmemb > 0)
+    {
+        qrk_str_t *remove = qrk_buf_get(&url->path, url->path.nmemb - 1);
+        qrk_str_free(remove);
+        url->path.nmemb--;
+    }
+
+    return 0;
+}
+
+int qrk_url_path_starts_windows_drive_letter (const char *start, const char *end)
+{
+    if (end - start < 2)
+        return 0;
+
+    if (!(isalpha(start[0]) && (start[1] == ':' || start[1] == '|')))
+        return 0;
+
+    if (end - start > 2 && (!(start[2] == '/' || start[2] == '\\' || start[2] == '?' || start[2] == '#')))
+        return 0;
+
+
+    return 1;
+}
+
+int32_t qrk__url_port_normalize (uint32_t port, qrk_str_t *scheme)
+{
+    for (int i = 0; i < 6; i++) {
+        if (scheme->len == SPECIAL_SCHEME[i].keylen &&
+            port == SPECIAL_SCHEME[i].port &&
+            !memcmp(scheme->base, SPECIAL_SCHEME[i].key, scheme->len))
+            return -1;
+    }
+    return port;
+}
+
+int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t *base,
+                         qrk_url_t **_url, qrk_url_parser_state_t state_override)
+{
+    char *p = _input->base;
+    char *end = _input->base + _input->len - 1;
+
+    if (*_url == NULL)
+    {
+        *_url = malloc(sizeof(qrk_url_t));
+        memset(*_url, 0, sizeof(qrk_url_t));
+        (*_url)->port = -1;
+
+        qrk_malloc_ctx_t *ctx = parser->m_ctx;
+
+        int r =
+            !qrk_url_host_init(&(*_url)->host, ctx) &&
+            qrk_str_malloc(&(*_url)->scheme, ctx, 8) &&
+            qrk_str_malloc(&(*_url)->username, ctx, 1) &&
+            qrk_str_malloc(&(*_url)->password, ctx, 1) &&
+            qrk_str_malloc(&(*_url)->query, ctx, 1) &&
+            qrk_str_malloc(&(*_url)->fragment, ctx, 1) &&
+            qrk_buf_malloc(&(*_url)->path, ctx, sizeof(qrk_str_t), 1);
+
+        if (r == 0)
+            return 1;
+
+        // remove leading or trailing C0 control or space characters
+        for (const char *c = p; c < end; c++)
+        {
+            if (C0_CONTROL_PERCENT_ENCODE_SET[*c] || *c == ' ')
+                p++;
+            else
+                break;
+        }
+
+        for (const char *c = end; c >= p; c--)
+        {
+            if (C0_CONTROL_PERCENT_ENCODE_SET[*c] || *c == ' ')
+                end--;
+            else
+                break;
+        }
+
+        if (end != _input->base + _input->len - 1 || p != _input->base)
+            (*_url)->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+    };
+
+    qrk_str_t input;
+
+    if (!qrk_str_malloc(&input, parser->m_ctx, end - p))
+        return 1;
+
+    for (char *c = p; c <= end; c++)
+        if (!(p[c - p] == '\n' || p[c - p] == '\r' || p[c - p] == '\t'))
+            input.base[input.len++] = *c;
+
+    qrk_url_t *url = *_url;
+
+    if (state_override)
+        parser->state = state_override;
+    else
+        parser->state = QRK_URL_PARSER_STATE_SCHEME_START;
+
+    qrk_str_t buffer;
+
+    if (!qrk_str_malloc(&buffer, parser->m_ctx, input.len))
+        goto fail1;
+
+    int atSignSeen = 0,
+        insideBrackets = 0,
+        passwordTokenSeen = 0;
+
+    const char *c = input.base;
+    const char *cend = input.base + input.len - 1;
+
+    while (c <= cend + 1)
+    {
+        switch (parser->state)
+        {
+            case QRK_URL_PARSER_STATE_SCHEME_START:
+            {
+                if (isalpha(*c))
+                {
+                    const char ch = tolower(*c);
+                    if (qrk_str_push_back(&buffer, &ch, 1) == NULL)
+                        goto fail;
+                    parser->state = QRK_URL_PARSER_STATE_SCHEME;
+                }
+                else if (!state_override)
+                {
+                    c--;
+                    parser->state = QRK_URL_PARSER_STATE_NO_SCHEME;
+                }
+                else
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_SCHEME:
+            {
+                if (isalnum(*c) || *c == '+' || *c == '-' || *c == '.')
+                {
+                    const char ch = tolower(*c);
+                    if (qrk_str_push_back(&buffer, &ch, 1) == NULL)
+                        goto fail;
+                }
+                else if (*c == ':')
+                {
+                    if (state_override)
+                    {
+                        int is_special = qrk_url_scheme_is_special((qrk_rbuf_t *) &buffer);
+
+                        // if buffer is special does not match url is special:
+                        if (is_special != (url->flags & QRK_URL_FLAG_SPECIAL))
+                            goto ret;
+
+                        // if buffer is file and url includes credentials or has non-null port:
+                        if ((buffer.len == 4 && !memcmp(buffer.base, "file", 4)) &&
+                            (((url->flags & QRK_URL_FLAG_HAS_PASSWORD) && (url->flags & QRK_URL_FLAG_HAS_USERNAME)) ||
+                            (url->port != -1)))
+                            goto ret;
+
+                        // if url scheme is file and its host is empty host:
+                        if (url->scheme.len == 4 && !memcmp(url->scheme.base, "file", 4) &&
+                            url->host.type == QRK_URL_HOST_EMPTY)
+                            goto ret;
+                    }
+
+                    url->scheme.len = 0;
+                    if (qrk_str_push_back(&url->scheme, buffer.base, buffer.len) == NULL)
+                        goto fail;
+
+                    int is_default_port = qrk_url_port_is_default((qrk_rbuf_t *) &url->scheme, url->port);
+                    if (state_override && is_default_port)
+                    {
+                        url->port = -1;
+                        goto ret;
+                    }
+
+                    buffer.len = 0;
+                    int special = qrk_url_scheme_is_special((qrk_rbuf_t *) &url->scheme);
+
+                    if (special)
+                        url->flags |= QRK_URL_FLAG_SPECIAL;
+                    else
+                        url->flags &= ~QRK_URL_FLAG_SPECIAL;
+
+                    int is_file = url->scheme.len == 4 && !memcmp(url->scheme.base, "file", 4);
+
+                    if (is_file)
+                        url->flags |= QRK_URL_FLAG_IS_FILE;
+                    else
+                        url->flags &= ~QRK_URL_FLAG_IS_FILE;
+
+                    if (is_file)
+                    {
+                        if ((c + 1 < end) || !memcmp(c + 1, "//", 2))
+                        {
+                            url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        }
+                        parser->state = QRK_URL_PARSER_STATE_FILE;
+                    }
+                    else if (special && base != NULL &&
+                            (url->scheme.len == base->scheme.len && !memcmp(url->scheme.base, base->scheme.base, url->scheme.len)))
+                    {
+                        parser->state = QRK_URL_PARSER_STATE_SPECIAL_RELATIVE_OR_AUTHORITY;
+                    }
+                    else if (special)
+                    {
+                        parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_SLASHES;
+                    }
+                    else if (c < end && c[1] == '/')
+                    {
+                        parser->state = QRK_URL_PARSER_STATE_PATH_OR_AUTHORITY;
+                        c++;
+                    }
+                    else
+                    {
+                        if (url->path.nmemb != 0)
+                            for (size_t i = 0; i <url->path.nmemb; i++)
+                                qrk_str_free((qrk_str_t *)(url->path.base + (i * url->path.memb_size)));
+
+                        url->path.nmemb = 0;
+                        qrk_str_t str;
+                        if (!qrk_str_malloc(&str, parser->m_ctx, 1))
+                            return 1;
+                        qrk_str_t *str_arr = &str;
+                        qrk_buf_push_back(&url->path, (const void **) &str_arr, 1);
+
+                        url->flags |= QRK_URL_FLAG_PATH_IS_OPAQUE;
+
+                        parser->state = QRK_URL_PARSER_STATE_OPAQUE_PATH;
+                    }
+                }
+                else if (!state_override)
+                {
+                    parser->state = QRK_URL_PARSER_STATE_NO_SCHEME;
+                    buffer.len = 0;
+                    c = input.base;
+                    continue;
+                }
+                else
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_NO_SCHEME:
+            {
+                if ((base == NULL || (base->flags & QRK_URL_FLAG_PATH_IS_OPAQUE)) && (*c != '#'))
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    goto fail;
+                }
+                else if (base != NULL && (base->flags & QRK_URL_FLAG_PATH_IS_OPAQUE) && (*c == '#'))
+                {
+                    url->scheme.len = 0;
+                    if (!qrk_str_push_back(&url->scheme, base->scheme.base, base->scheme.len))
+                        goto fail;
+
+                    if (base->flags & QRK_URL_FLAG_SPECIAL)
+                        url->flags |= QRK_URL_FLAG_SPECIAL;
+                    else
+                        url->flags &= ~QRK_URL_FLAG_SPECIAL;
+
+                    if (base->flags & QRK_URL_FLAG_IS_FILE)
+                        url->flags |= QRK_URL_FLAG_IS_FILE;
+                    else
+                        url->flags &= ~QRK_URL_FLAG_IS_FILE;
+
+                    if (url->path.nmemb != 0)
+                        for (size_t i = 0; i <url->path.nmemb; i++)
+                            qrk_str_free((qrk_str_t *)(url->path.base + (i * url->path.memb_size)));
+                    url->path.nmemb = 0;
+                    for (size_t i = 0; i < base->path.nmemb; i++)
+                    {
+                        qrk_str_t *path_i = (qrk_str_t *)(base->path.base + (i * base->path.memb_size));
+                        qrk_str_t str;
+                        if (!qrk_str_malloc(&str, parser->m_ctx, path_i->len))
+                            return 1;
+                        qrk_str_t *str_arr = &str;
+                        if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                            goto fail;
+                    }
+                    url->flags |= QRK_URL_FLAG_PATH_IS_OPAQUE;
+
+                    url->query.len = 0;
+                    if (!qrk_str_push_back(&url->query, base->query.base, base->query.len))
+                        goto fail;
+
+                    url->fragment.len = 0;
+
+                    parser->state = QRK_URL_PARSER_STATE_FRAGMENT;
+                }
+                else if ((base != NULL) && !(base->flags & QRK_URL_FLAG_IS_FILE))
+                {
+                    parser->state = QRK_URL_PARSER_STATE_RELATIVE;
+                    c--;
+                }
+                else
+                {
+                    parser->state = QRK_URL_PARSER_STATE_FILE;
+                    c--;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_SPECIAL_RELATIVE_OR_AUTHORITY:
+            {
+                if (*c == '/' && c < end & c[1] == '/')
+                {
+                    parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES;
+                    c++;
+                }
+                else
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    parser->state = QRK_URL_PARSER_STATE_RELATIVE;
+                    c--;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_PATH_OR_AUTHORITY:
+            {
+                if (*c == '/')
+                {
+                    parser->state = QRK_URL_PARSER_STATE_AUTHORITY;
+                }
+                else
+                {
+                    parser->state = QRK_URL_PARSER_STATE_PATH;
+                    c--;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_RELATIVE:
+            {
+                if (base->flags & QRK_URL_FLAG_IS_FILE)
+                    goto fail;
+                url->scheme.len = 0;
+                if (!qrk_str_push_back(&url->scheme, base->scheme.base, base->scheme.len))
+                    goto fail;
+
+                if (base->flags & QRK_URL_FLAG_SPECIAL)
+                    url->flags |= QRK_URL_FLAG_SPECIAL;
+                else
+                    url->flags &= ~QRK_URL_FLAG_SPECIAL;
+
+                if (base->flags & QRK_URL_FLAG_IS_FILE)
+                    url->flags |= QRK_URL_FLAG_IS_FILE;
+                else
+                    url->flags &= ~QRK_URL_FLAG_IS_FILE;
+
+                if (*c == '/')
+                    parser->state = QRK_URL_PARSER_STATE_RELATIVE_SLASH;
+                else if ((url->flags & QRK_URL_FLAG_SPECIAL) && (*c == '\\'))
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    parser->state = QRK_URL_PARSER_STATE_RELATIVE_SLASH;
+                }
+                else
+                {
+                    url->username.len = 0;
+                    if (!qrk_str_push_back(&url->username, base->username.base, base->username.len))
+                        goto fail;
+
+                    url->password.len = 0;
+                    if (!qrk_str_push_back(&url->password, base->password.base, base->password.len))
+                        goto fail;
+
+                    url->host.type = base->host.type;
+                    url->host.ipv4 = base->host.ipv4;
+                    memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
+                    url->host.str.len = 0;
+                    if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                        goto fail;
+
+                    url->port = base->port;
+
+                    // clone path
+                    if (url->path.nmemb != 0)
+                        for (size_t i = 0; i <url->path.nmemb; i++)
+                            qrk_str_free((qrk_str_t *)(url->path.base + (i * url->path.memb_size)));
+                    url->path.nmemb = 0;
+                    for (size_t i = 0; i < base->path.nmemb; i++)
+                    {
+                        qrk_str_t *path_i = (qrk_str_t *)(base->path.base + (i * base->path.memb_size));
+                        qrk_str_t str;
+                        if (!qrk_str_malloc(&str, parser->m_ctx, path_i->len))
+                            goto fail;
+                        if (!qrk_str_push_back(&str, path_i->base, path_i->len))
+                        {
+                            qrk_str_free(&str);
+                            goto fail;
+                        }
+                        qrk_str_t *str_arr = &str;
+                        if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                            goto fail;
+                    }
+                    if (base->flags & QRK_URL_FLAG_PATH_IS_OPAQUE)
+                        url->flags |= QRK_URL_FLAG_PATH_IS_OPAQUE;
+                    else
+                        url->flags &= ~QRK_URL_FLAG_PATH_IS_OPAQUE;
+
+                    url->query.len = 0;
+                    if (!qrk_str_push_back(&url->query, base->query.base, base->query.len))
+                        goto fail;
+
+                    if (*c == '?')
+                    {
+                        url->query.len = 0;
+                        parser->state = QRK_URL_PARSER_STATE_QUERY;
+                    }
+                    else if (*c == '#')
+                    {
+                        url->fragment.len = 0;
+                        parser->state = QRK_URL_PARSER_STATE_FRAGMENT;
+                    }
+                    else if (c <= cend)
+                    {
+                        url->query.len = 0;
+                        if (qrk_url_path_shorten(url))
+                            goto fail;
+                        parser->state = QRK_URL_PARSER_STATE_PATH;
+                        c--;
+                    }
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_RELATIVE_SLASH:
+            {
+                if (url->flags & QRK_URL_FLAG_SPECIAL && (*c == '/' || *c == '\\'))
+                {
+                    if (*c == '\\')
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES;
+                }
+                else if (*c == '/')
+                {
+                    parser->state = QRK_URL_PARSER_STATE_AUTHORITY;
+                }
+                else
+                {
+                    url->username.len = 0;
+                    if (!qrk_str_push_back(&url->username, base->username.base, base->username.len))
+                        goto fail;
+
+                    url->password.len = 0;
+                    if (!qrk_str_push_back(&url->password, base->password.base, base->password.len))
+                        goto fail;
+
+                    url->host.type = base->host.type;
+                    url->host.ipv4 = base->host.ipv4;
+                    memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
+                    url->host.str.len = 0;
+                    if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                        goto fail;
+
+                    url->port = base->port;
+
+                    parser->state = QRK_URL_PARSER_STATE_PATH;
+                    c--;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_SLASHES:
+            {
+                if (*c == '/' && c < cend && c[1] == '/')
+                {
+                    parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES;
+                    c++;
+                }
+                else
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES;
+                    c--;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES:
+            {
+                if (*c != '/' && *c != '\\')
+                {
+                    parser->state = QRK_URL_PARSER_STATE_AUTHORITY;
+                    c--;
+                }
+                else
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_AUTHORITY:
+            {
+                if (*c == '@')
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+
+                    if (atSignSeen) {
+                        qrk_str_push_front(&buffer, "%40", 3);
+                    }
+
+                    atSignSeen = 1;
+
+                    if (buffer.len > 0 && buffer.base[0] != ':')
+                        url->flags |= QRK_URL_FLAG_HAS_USERNAME;
+
+                    for (size_t n = 0; n < buffer.len; n++)
+                    {
+                        if (buffer.base[n] == ':')
+                        {
+                            url->flags |= QRK_URL_FLAG_HAS_PASSWORD;
+                            if (!passwordTokenSeen)
+                            {
+                                passwordTokenSeen = 1;
+                                continue;
+                            }
+                        }
+
+
+                        if (passwordTokenSeen)
+                            if (qrk_url_percent_encode2(&url->password, c, 1, USERINFO_PERCENT_ENCODE_SET))
+                                goto fail;
+                        else
+                            if (qrk_url_percent_encode2(&url->username, c, 1, USERINFO_PERCENT_ENCODE_SET))
+                                goto fail;
+                    }
+
+                    buffer.len = 0;
+                }
+                else if ((c > cend) || *c == '/' || *c == '?' || *c == '#' || ((url->flags & QRK_URL_FLAG_SPECIAL) && *c == '\\'))
+                {
+                    if (atSignSeen && (buffer.len == 0))
+                    {
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        goto fail;
+                    }
+                    c = c - (buffer.len + 1);
+                    buffer.len = 0;
+                    parser->state = QRK_URL_PARSER_STATE_HOST;
+                }
+                else
+                {
+                    if (!qrk_str_push_back(&buffer, c, 1))
+                        goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_HOST:
+            case QRK_URL_PARSER_STATE_HOSTNAME:
+            {
+                if (state_override && (url->flags & QRK_URL_FLAG_IS_FILE))
+                {
+                    c--;
+                    parser->state = QRK_URL_PARSER_STATE_FILE_HOST;
+                }
+                else if (*c == ':' && !insideBrackets)
+                {
+                    if (buffer.len == 0)
+                    {
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        goto fail;
+                    }
+                    if (state_override == QRK_URL_PARSER_STATE_HOSTNAME)
+                        goto ret;
+                    int validation_error = 0;
+                    int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, 1, &validation_error);
+                    if (r)
+                    {
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        goto fail;
+                    }
+                    if (validation_error)
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    url->flags |= QRK_URL_FLAG_HAS_HOST;
+                    buffer.len = 0;
+                    parser->state = QRK_URL_PARSER_STATE_PORT;
+                }
+                else if ((c > cend) || *c == '/' || *c == '?' || *c == '#' || ((url->flags & QRK_URL_FLAG_SPECIAL) && *c == '\\'))
+                {
+                    c--;
+                    if ((url->flags & QRK_URL_FLAG_SPECIAL) && buffer.len == 0)
+                    {
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        goto fail;
+                    }
+                    else if (state_override &&
+                             buffer.len == 0 &&
+                             ((url->username.len > 0 || url->password.len > 0) || url->port != -1)) {
+                        goto ret;
+                    }
+                    int validation_error = 0;
+                    int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, 1, &validation_error);
+                    if (r)
+                    {
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        goto fail;
+                    }
+                    if (validation_error)
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    url->flags |= QRK_URL_FLAG_HAS_HOST;
+                    buffer.len = 0;
+                    parser->state = QRK_URL_PARSER_STATE_PATH_START;
+                    if (state_override)
+                        goto ret;
+                }
+                else
+                {
+                    if (*c == '[')
+                        insideBrackets = 1;
+                    else if (*c == ']')
+                        insideBrackets = 0;
+                    if (!qrk_str_push_back(&buffer, c, 1))
+                        goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_PORT:
+            {
+                if (isdigit(*c))
+                {
+                    if (!qrk_str_push_back(&buffer, c, 1))
+                        goto fail;
+                }
+                else if ((c > cend) || *c == '/' || *c == '?' || *c == '#' || ((url->flags & QRK_URL_FLAG_SPECIAL) && *c == '\\') || state_override)
+                {
+                    if (buffer.len != 0)
+                    {
+                        uint32_t port = 0;
+                        for (size_t i = 0; i < buffer.len && port <= 0xffff; i++)
+                            port = port * 10 + buffer.base[i] - '0';
+                        if (port > 0xffff)
+                        {
+                            url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                            goto fail;
+                        }
+
+                        url->port = qrk__url_port_normalize(port, &url->scheme);
+
+                        buffer.len = 0;
+                    }
+                    if (state_override)
+                        goto ret;
+                    parser->state = QRK_URL_PARSER_STATE_PATH_START;
+                    c--;
+                }
+                else
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_FILE:
+            {
+                url->scheme.len = 0;
+                url->flags |= QRK_URL_FLAG_IS_FILE;
+                if (!qrk_str_push_back(&url->scheme, "file", 4))
+                    goto fail;
+                if (*c == '/')
+                    parser->state = QRK_URL_PARSER_STATE_FILE_SLASH;
+                else if (*c == '\\')
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    parser->state = QRK_URL_PARSER_STATE_FILE_SLASH;
+                }
+                else if (base && (base->flags & QRK_URL_FLAG_IS_FILE))
+                {
+                    url->host.type = base->host.type;
+                    url->host.ipv4 = base->host.ipv4;
+                    memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
+                    url->host.str.len = 0;
+                    if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                        goto fail;
+
+                    url->port = base->port;
+
+                    // clone path
+                    if (url->path.nmemb != 0)
+                        for (size_t i = 0; i <url->path.nmemb; i++)
+                            qrk_str_free((qrk_str_t *)(url->path.base + (i * url->path.memb_size)));
+                    url->path.nmemb = 0;
+                    for (size_t i = 0; i < base->path.nmemb; i++)
+                    {
+                        qrk_str_t *path_i = (qrk_str_t *)(base->path.base + (i * base->path.memb_size));
+                        qrk_str_t str;
+                        if (!qrk_str_malloc(&str, parser->m_ctx, path_i->len))
+                            goto fail;
+
+                        if (!qrk_str_push_back(&str, path_i->base, path_i->len))
+                        {
+                            qrk_str_free(&str);
+                            goto fail;
+                        }
+                        qrk_str_t *str_arr = &str;
+                        if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                            goto fail;
+                    }
+                    if (base->flags & QRK_URL_FLAG_PATH_IS_OPAQUE)
+                        url->flags |= QRK_URL_FLAG_PATH_IS_OPAQUE;
+                    else
+                        url->flags &= ~QRK_URL_FLAG_PATH_IS_OPAQUE;
+
+                    url->query.len = 0;
+                    if (!qrk_str_push_back(&url->query, base->query.base, base->query.len))
+                        goto fail;
+
+                    if (*c == '?')
+                    {
+                        url->query.len = 0;
+                        parser->state = QRK_URL_PARSER_STATE_QUERY;
+                    }
+                    else if (*c == '#')
+                    {
+                        url->fragment.len = 0;
+                        parser->state = QRK_URL_PARSER_STATE_FRAGMENT;
+                    }
+                    else if (c <= cend)
+                    {
+                        url->query.len = 0;
+                        if (!qrk_url_path_starts_windows_drive_letter(c, cend))
+                        {
+                            if (qrk_url_path_shorten(url))
+                                goto fail;
+                        }
+                        else
+                        {
+                            url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                            if (url->path.nmemb != 0)
+                                for (size_t i = 0; i <url->path.nmemb; i++)
+                                    qrk_str_free((qrk_str_t *)(url->path.base + (i * url->path.memb_size)));
+                            url->path.nmemb = 0;
+                        }
+                        parser->state = QRK_URL_PARSER_STATE_PATH;
+                        c--;
+                    }
+                }
+                else
+                {
+                    parser->state = QRK_URL_PARSER_STATE_PATH;
+                    c--;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_FILE_SLASH:
+            {
+                if (*c == '/')
+                {
+                    parser->state = QRK_URL_PARSER_STATE_FILE_HOST;
+                }
+                else if (*c == '\\')
+                {
+                    url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    parser->state = QRK_URL_PARSER_STATE_FILE_HOST;
+                }
+                else
+                {
+                    if (base && (base->flags & QRK_URL_FLAG_IS_FILE))
+                    {
+                        // TODO: refactor: move host duplication to its own method
+                        url->host.type = base->host.type;
+                        url->host.ipv4 = base->host.ipv4;
+                        memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
+                        url->host.str.len = 0;
+                        if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                            goto fail;
+
+                        if (!qrk_url_path_starts_windows_drive_letter(c, cend) &&
+                            base->path.nmemb >= 1)
+                        {
+                            qrk_str_t *path0 = ((qrk_str_t *)qrk_buf_get(&base->path, 0));
+                            if (path0->len == 2 && isalpha(path0->base[0]) && path0->base[1] == ':')
+                            {
+                                qrk_str_t str;
+                                if (!qrk_str_malloc(&str, parser->m_ctx, path0->len))
+                                    goto fail;
+
+                                if (!qrk_str_push_back(&str, path0->base, path0->len))
+                                {
+                                    qrk_str_free(&str);
+                                    goto fail;
+                                }
+                                qrk_str_t *str_arr = &str;
+                                if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                                    goto fail;
+                            }
+                        }
+                    }
+                    parser->state = QRK_URL_PARSER_STATE_PATH;
+                    c--;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_FILE_HOST:
+            {
+                if ((c > cend) || *c == '/' || *c == '\\' || *c == '?' || *c == '#')
+                {
+                    c--;
+                    if (!state_override && buffer.len == 2 && isalpha(buffer.base[0]) && (buffer.base[1] == ':' || buffer.base[1] == '|'))
+                    {
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        parser->state = QRK_URL_PARSER_STATE_PATH;
+                    }
+                    else if (buffer.len == 0)
+                    {
+                        url->host.type = QRK_URL_HOST_EMPTY;
+                        url->host.str.len = 0;
+                        if (state_override)
+                            goto ret;
+                        parser->state = QRK_URL_PARSER_STATE_PATH_START;
+                    }
+                    else
+                    {
+                        int validation_error = 0;
+                        int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, 1, &validation_error);
+                        if (r)
+                        {
+                            url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                            goto fail;
+                        }
+                        if (validation_error)
+                            url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                        url->flags |= QRK_URL_FLAG_HAS_HOST;
+                        if (url->host.type == QRK_URL_HOST_OPAQUE || url->host.type == QRK_URL_HOST_DOMAIN)
+                        {
+                            if (url->host.str.len == 9 && !memcmp(url->host.str.base, "localhost", 9))
+                            {
+                                url->host.type = QRK_URL_HOST_EMPTY;
+                                url->host.str.len = 0;
+                            }
+                        }
+                        if (state_override)
+                            goto ret;
+                        parser->state = QRK_URL_PARSER_STATE_PATH_START;
+                        buffer.len = 0;
+                    }
+                }
+                else
+                {
+                    if (!qrk_str_push_back(&url->host.str, c, 1))
+                        goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_PATH_START:
+            {
+                if (url->flags & QRK_URL_FLAG_SPECIAL)
+                {
+                    if (*c == '\\')
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+
+                    parser->state = QRK_URL_PARSER_STATE_PATH;
+                    if (!(*c == '/' || *c == '\\'))
+                        c--;
+                }
+                else if (!state_override && *c == '?')
+                {
+                    url->query.len = 0;
+                    parser->state = QRK_URL_PARSER_STATE_QUERY;
+                }
+                else if (!state_override && *c == '#')
+                {
+                    url->fragment.len = 0;
+                    parser->state = QRK_URL_PARSER_STATE_FRAGMENT;
+                }
+                else if (c <= cend)
+                {
+                    parser->state = QRK_URL_PARSER_STATE_PATH;
+                    if (*c != '/')
+                        c--;
+                }
+                else if (state_override && url->host.type == QRK_URL_HOST_NULL)
+                {
+                    qrk_str_t str;
+                    if (!qrk_str_malloc(&str, parser->m_ctx, 1))
+                        goto fail;
+                    qrk_str_t *str_arr = &str;
+                    if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                        goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_PATH:
+            {
+                if ((c > cend || *c == '/') ||
+                    ((url->flags & QRK_URL_FLAG_SPECIAL) && *c == '\\') ||
+                    (!state_override && (*c == '?' || *c == '#')))
+                {
+                    if ((url->flags & QRK_URL_FLAG_SPECIAL) && *c == '\\')
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    if ((buffer.len == 2 && !memcmp(buffer.base, "..", 2)) ||
+                        (buffer.len == 4 && (!strncasecmp(buffer.base, ".%2e", 4) || !strncasecmp(buffer.base, "%2e.", 4))) ||
+                        (buffer.len == 6 && !strncasecmp(buffer.base, "%2e%2e", 6)))
+                    {
+                        if (qrk_url_path_shorten(url))
+                            goto fail;
+                        if (!(*c == '/' || ((url->flags & QRK_URL_FLAG_SPECIAL) && *c == '\\')))
+                        {
+                            qrk_str_t str;
+                            if (!qrk_str_malloc(&str, parser->m_ctx, 1))
+                                goto fail;
+                            qrk_str_t *str_arr = &str;
+                            if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                                goto fail;
+                        }
+                    }
+                    else if ((buffer.len == 1 && buffer.base[0] == '.') ||
+                            (buffer.len == 3 && !strncasecmp(buffer.base, "%2e", 3)))
+                    {
+                        if (!(*c == '/' || ((url->flags & QRK_URL_FLAG_SPECIAL) && *c == '\\')))
+                        {
+                            qrk_str_t str;
+                            if (!qrk_str_malloc(&str, parser->m_ctx, 1))
+                                goto fail;
+                            qrk_str_t *str_arr = &str;
+                            if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                                goto fail;
+                        }
+                    }
+                    else
+                    {
+                        if ((url->flags & QRK_URL_FLAG_IS_FILE) && url->path.nmemb == 0 && buffer.len == 2 &&
+                            (isalpha(buffer.base[0]) && (buffer.base[1] == ':' || buffer.base[1] == '|')))
+                        {
+                            buffer.base[1] = ':';
+                        }
+                        // TODO: this is how all of the copies should be, with memcpy not push_back since malloc already assures memory is allocated
+                        qrk_str_t str;
+                        if (!qrk_str_malloc(&str, parser->m_ctx, buffer.len))
+                            goto fail;
+                        memcpy(str.base, buffer.base, buffer.len);
+                        str.len = buffer.len;
+                        qrk_str_t *str_arr = &str;
+                        if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                            goto fail;
+
+                    }
+                    buffer.len = 0;
+                    if (*c == '?')
+                    {
+                        url->query.len = 0;
+                        parser->state = QRK_URL_PARSER_STATE_QUERY;
+                    }
+                    else if (*c == '#')
+                    {
+                        url->fragment.len = 0;
+                        parser->state = QRK_URL_PARSER_STATE_FRAGMENT;
+                    }
+                }
+                else
+                {
+                    // TODO: If c is not a URL code point and not U+0025 (%), validation error.
+                    // XXX: We're not validating URL code points. See above.
+                    if (*c == '%' && (cend - c >= 2) && !(isxdigit(c[1]) && isxdigit(c[2])))
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+
+                    if (qrk_url_percent_encode2(&buffer, c, 1, PATH_PERCENT_ENCODE_SET))
+                        goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_OPAQUE_PATH:
+            {
+                if (*c == '?')
+                {
+                    url->query.len = 0;
+                    parser->state = QRK_URL_PARSER_STATE_QUERY;
+                }
+                else if (*c == '#')
+                {
+                    url->fragment.len = 0;
+                    parser->state = QRK_URL_PARSER_STATE_FRAGMENT;
+                }
+                else
+                {
+                    // TODO: If c is not the EOF code point, not a URL code point, and not U+0025 (%), validation error.
+                    // XXX: We're not validating URL code points. See above.
+                    if (*c == '%' && (cend - c >= 2) && !(isxdigit(c[1]) && isxdigit(c[2])))
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    if ((c <= cend))
+                    {
+                        qrk_str_t str;
+                        if (!qrk_str_malloc(&str, parser->m_ctx, 1))
+                            goto fail;
+                        if (qrk_url_percent_encode2(&str, c, 1, C0_CONTROL_PERCENT_ENCODE_SET))
+                            goto fail;
+                        qrk_str_t *str_arr = &str;
+                        if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                            goto fail;
+                    }
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_QUERY:
+            {
+                // XXX: We assume encoding is UTF-8.
+                if ((!state_override && *c == '#') || (c > cend))
+                {
+                    if (qrk_url_percent_encode2(&url->query, buffer.base, buffer.len,
+                                                (url->flags & QRK_URL_FLAG_SPECIAL) ?
+                                                        SPECIAL_QUERY_PERCENT_ENCODE_SET :
+                                                        QUERY_PERCENT_ENCODE_SET)
+                    )
+                        goto fail;
+                    buffer.len = 0;
+                    if (*c == '#')
+                    {
+                        url->fragment.len = 0;
+                        parser->state = QRK_URL_PARSER_STATE_FRAGMENT;
+                    }
+                }
+                else if (c <= cend)
+                {
+                    // TODO: If c is not a URL code point and not U+0025 (%), validation error.
+                    // XXX: We're not validating URL code points. See above.
+                    if (*c == '%' && (cend - c >= 2) && !(isxdigit(c[1]) && isxdigit(c[2])))
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    if (!qrk_str_push_back(&buffer, c, 1))
+                        goto fail;
+                }
+            }
+            break;
+
+            case QRK_URL_PARSER_STATE_FRAGMENT:
+            {
+                if (c <= cend)
+                {
+                    // TODO: If c is not a URL code point and not U+0025 (%), validation error.
+                    // XXX: We're not validating URL code points. See above.
+                    if (*c == '%' && (cend - c >= 2) && !(isxdigit(c[1]) && isxdigit(c[2])))
+                        url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
+                    if (!qrk_url_percent_encode2(&url->fragment, c, 1, FRAGMENT_PERCENT_ENCODE_SET))
+                        goto fail;
+                }
+            }
+            break;
+        }
+        c++;
+    }
+
+ret:
+    qrk_str_free(&buffer);
+    qrk_str_free(&input);
+    return 0;
+fail:
+    qrk_str_free(&buffer);
+fail1:
+    qrk_str_free(&input);
+    return 1;
+}
+
+int qrk_url_parser_init (qrk_url_parser_t *parser, qrk_malloc_ctx_t *ctx)
+{
+    memset(parser, 0, sizeof(qrk_url_parser_t));
+
+    parser->m_ctx = ctx;
+
+    return 0;
+}
+
+void qrk_url_free (qrk_url_t *url)
+{
+    qrk_str_free(&url->scheme);
+    qrk_str_free(&url->username);
+    qrk_str_free(&url->password);
+    qrk_str_free(&url->query);
+    qrk_str_free(&url->fragment);
+
+    qrk_url_host_free(&url->host);
+
+    for (size_t i = 0; i < url->path.nmemb; i++)
+        qrk_str_free((qrk_str_t *)(url->path.base + (i * url->path.memb_size)));
+
+    qrk_buf_free(&url->path);
 }
