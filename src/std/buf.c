@@ -8,7 +8,7 @@
 void *qrk_str_malloc (qrk_str_t *buf, qrk_malloc_ctx_t *ctx, size_t initial_size)
 {
     buf->m_ctx = ctx;
-    buf->base = qrk_malloc(ctx, initial_size);
+    buf->base = qrk_malloc(ctx, initial_size ? initial_size : 1);
     buf->len = 0;
     buf->size = initial_size;
     return buf->base;

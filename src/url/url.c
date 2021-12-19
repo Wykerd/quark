@@ -269,9 +269,9 @@ int qrk_url_percent_encode2 (qrk_str_t *dest, const char *src, size_t len, const
 {
     for (size_t i = 0; i < len; i++)
     {
-        if (set[src[i]])
+        if (set[(uint8_t)src[i]])
         {
-            if (!qrk_str_push_back(dest, PERCENT_ENCODING + src[i] * 4, 3))
+            if (!qrk_str_push_back(dest, PERCENT_ENCODING + (uint8_t)src[i] * 4, 3))
                 return 1;
         }
         else
@@ -301,13 +301,13 @@ int qrk_url_domain_to_ascii (qrk_str_t *dest, qrk_rbuf_t *src, int be_strict)
 
     UIDNAInfo info = UIDNA_INFO_INITIALIZER;
 
-    int output_length = uidna_nameToASCII(idna, (const UChar *) src->base, src->len, (UChar *) dest->base, dest->size, &info, &err);
+    int output_length = uidna_nameToASCII_UTF8(idna, src->base, (int32_t)src->len, dest->base, (int32_t)dest->size, &info, &err);
 
     if (err == U_BUFFER_OVERFLOW_ERROR)
     {
         err = U_ZERO_ERROR;
         qrk_str_resize(dest, output_length);
-        output_length = uidna_nameToASCII(idna, (const UChar *) src->base, src->len, (UChar *) dest->base, dest->size, &info, &err);
+        output_length = uidna_nameToASCII_UTF8(idna,  src->base, (int32_t)src->len, dest->base, (int32_t)dest->size, &info, &err);
     };
 
     dest->len = output_length;
@@ -696,7 +696,7 @@ int qrk_url_host_opaque_parse (qrk_str_t *dest, qrk_rbuf_t *src, int *validation
     // XXX: we do not validate that %-encoded characters are valid.
     // XXX: we do not validate that characters are URL code points.
     for (size_t i = 0; i < src->len; i++)
-        if (src->base[i] != '%' && FORBIDDEN_HOST_CODE_POINT[src->base[i]])
+        if (src->base[i] != '%' && FORBIDDEN_HOST_CODE_POINT[(uint8_t)src->base[i]])
         {
             *validation_error = 1;
             return 1;
@@ -739,7 +739,7 @@ int qrk_url_host_parse (qrk_url_host_t *dest, qrk_rbuf_t *src, int is_not_specia
     if (qrk_url_domain_to_ascii(&asciiDomain, (qrk_rbuf_t *) &domain, 0))
         goto fail;
     for (size_t i = 0; i < asciiDomain.len; i++)
-        if (FORBIDDEN_HOST_CODE_POINT[asciiDomain.base[i]])
+        if (FORBIDDEN_HOST_CODE_POINT[(uint8_t)asciiDomain.base[i]])
             goto fail;
 
     int v4_validation_error = 0;
@@ -956,7 +956,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
         // remove leading or trailing C0 control or space characters
         for (const char *c = p; c < end; c++)
         {
-            if (C0_CONTROL_PERCENT_ENCODE_SET[*c] || *c == ' ')
+            if (C0_CONTROL_PERCENT_ENCODE_SET[(uint8_t)*c] || *c == ' ')
                 p++;
             else
                 break;
@@ -964,7 +964,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
         for (const char *c = end; c >= p; c--)
         {
-            if (C0_CONTROL_PERCENT_ENCODE_SET[*c] || *c == ' ')
+            if (C0_CONTROL_PERCENT_ENCODE_SET[(uint8_t)*c] || *c == ' ')
                 end--;
             else
                 break;
@@ -976,7 +976,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
     qrk_str_t input;
 
-    if (!qrk_str_malloc(&input, parser->m_ctx, end - p))
+    if (!qrk_str_malloc(&input, parser->m_ctx, end - p + 1))
         return 1;
 
     for (char *c = p; c <= end; c++)
@@ -1086,7 +1086,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
                     if (is_file)
                     {
-                        if ((c + 1 < end) || !memcmp(c + 1, "//", 2))
+                        if ((c + 3 > cend) || memcmp(c + 1, "//", 2))
                         {
                             url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
                         }
@@ -1101,7 +1101,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     {
                         parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_SLASHES;
                     }
-                    else if (c < end && c[1] == '/')
+                    else if (c < cend && c[1] == '/')
                     {
                         parser->state = QRK_URL_PARSER_STATE_PATH_OR_AUTHORITY;
                         c++;
@@ -1201,7 +1201,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
             case QRK_URL_PARSER_STATE_SPECIAL_RELATIVE_OR_AUTHORITY:
             {
-                if (*c == '/' && c < end & c[1] == '/')
+                if (*c == '/' && c < cend & c[1] == '/')
                 {
                     parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES;
                     c++;
@@ -1411,19 +1411,18 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                         if (buffer.base[n] == ':')
                         {
                             url->flags |= QRK_URL_FLAG_HAS_PASSWORD;
-                            if (!passwordTokenSeen)
-                            {
-                                passwordTokenSeen = 1;
-                                continue;
-                            }
+                            passwordTokenSeen = 1;
+                            continue;
                         }
 
 
                         if (passwordTokenSeen)
-                            if (qrk_url_percent_encode2(&url->password, c, 1, USERINFO_PERCENT_ENCODE_SET))
+                        {
+                            if (qrk_url_percent_encode2(&url->password, buffer.base + n, 1, USERINFO_PERCENT_ENCODE_SET))
                                 goto fail;
+                        }
                         else
-                            if (qrk_url_percent_encode2(&url->username, c, 1, USERINFO_PERCENT_ENCODE_SET))
+                            if (qrk_url_percent_encode2(&url->username, buffer.base + n, 1, USERINFO_PERCENT_ENCODE_SET))
                                 goto fail;
                     }
 
@@ -1466,7 +1465,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     if (state_override == QRK_URL_PARSER_STATE_HOSTNAME)
                         goto ret;
                     int validation_error = 0;
-                    int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, 1, &validation_error);
+                    int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, !(url->flags & QRK_URL_FLAG_SPECIAL), &validation_error);
                     if (r)
                     {
                         url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
@@ -1474,7 +1473,6 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     }
                     if (validation_error)
                         url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
-                    url->flags |= QRK_URL_FLAG_HAS_HOST;
                     buffer.len = 0;
                     parser->state = QRK_URL_PARSER_STATE_PORT;
                 }
@@ -1492,7 +1490,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                         goto ret;
                     }
                     int validation_error = 0;
-                    int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, 1, &validation_error);
+                    int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, !(url->flags & QRK_URL_FLAG_SPECIAL), &validation_error);
                     if (r)
                     {
                         url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
@@ -1500,7 +1498,6 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     }
                     if (validation_error)
                         url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
-                    url->flags |= QRK_URL_FLAG_HAS_HOST;
                     buffer.len = 0;
                     parser->state = QRK_URL_PARSER_STATE_PATH_START;
                     if (state_override)
@@ -1718,7 +1715,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     else
                     {
                         int validation_error = 0;
-                        int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, 1, &validation_error);
+                        int r = qrk_url_host_parse(&url->host, (qrk_rbuf_t *) &buffer, !(url->flags & QRK_URL_FLAG_SPECIAL), &validation_error);
                         if (r)
                         {
                             url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
@@ -1726,7 +1723,6 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                         }
                         if (validation_error)
                             url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
-                        url->flags |= QRK_URL_FLAG_HAS_HOST;
                         if (url->host.type == QRK_URL_HOST_OPAQUE || url->host.type == QRK_URL_HOST_DOMAIN)
                         {
                             if (url->host.str.len == 9 && !memcmp(url->host.str.base, "localhost", 9))
@@ -1888,13 +1884,17 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                         url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
                     if ((c <= cend))
                     {
-                        qrk_str_t str;
-                        if (!qrk_str_malloc(&str, parser->m_ctx, 1))
-                            goto fail;
-                        if (qrk_url_percent_encode2(&str, c, 1, C0_CONTROL_PERCENT_ENCODE_SET))
-                            goto fail;
-                        qrk_str_t *str_arr = &str;
-                        if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                        if (url->path.nmemb == 0)
+                        {
+                            qrk_str_t str;
+                            if (!qrk_str_malloc(&str, parser->m_ctx, 1))
+                                goto fail;
+                            qrk_str_t *str_arr = &str;
+                            if (!qrk_buf_push_back(&url->path, (const void **) &str_arr, 1))
+                                goto fail;
+                        }
+                        qrk_str_t *str = (qrk_str_t *)url->path.base;
+                        if (qrk_url_percent_encode2(str, c, 1, C0_CONTROL_PERCENT_ENCODE_SET))
                             goto fail;
                     }
                 }
@@ -1939,11 +1939,14 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     // XXX: We're not validating URL code points. See above.
                     if (*c == '%' && (cend - c >= 2) && !(isxdigit(c[1]) && isxdigit(c[2])))
                         url->flags |= QRK_URL_FLAG_VALIDATION_ERROR;
-                    if (!qrk_url_percent_encode2(&url->fragment, c, 1, FRAGMENT_PERCENT_ENCODE_SET))
+                    if (qrk_url_percent_encode2(&url->fragment, c, 1, FRAGMENT_PERCENT_ENCODE_SET))
                         goto fail;
                 }
             }
             break;
+
+            case QRK_URL_PARSER_STATE_NO_OVERRIDE:
+                break;
         }
         c++;
     }

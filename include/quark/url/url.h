@@ -63,9 +63,8 @@ typedef enum qrk_url_flags {
     QRK_URL_FLAG_HAS_USERNAME       = 1 << 2,
     QRK_URL_FLAG_HAS_PASSWORD       = 1 << 3,
     QRK_URL_FLAG_PATH_IS_OPAQUE     = 1 << 4,
-    QRK_URL_FLAG_HAS_HOST           = 1 << 5,
-    QRK_URL_FLAG_IS_FILE            = 1 << 6,
-    QRK_URL_FLAG_VALIDATION_ERROR   = 1 << 7
+    QRK_URL_FLAG_IS_FILE            = 1 << 5,
+    QRK_URL_FLAG_VALIDATION_ERROR   = 1 << 6
 } qrk_url_flags_t;
 
 typedef struct qrk_url_s {
