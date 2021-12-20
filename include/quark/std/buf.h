@@ -51,6 +51,13 @@ void *qrk_buf_resize (qrk_buf_t *buf, size_t nmemb);
  */
 void *qrk_buf_push_back (qrk_buf_t *buf, const void **src, size_t nmemb);
 /**
+ * Add single element to back of buffer.
+ * @param buf The target buffer.
+ * @param src Element to add.
+ * @returns Pointer to element added.
+ */
+void *qrk_buf_push_back1 (qrk_buf_t *buf, const void *src);
+/**
  * Add elements to front of buffer.
  * @param buf The target buffer.
  * @param src Array of elements to add.
@@ -78,10 +85,13 @@ void qrk_buf_free (qrk_buf_t *buf);
  */
 void *qrk_buf_get (qrk_buf_t *buf, size_t i);
 
+#define QRK_STR_PUTC_GROWTH_FACTOR 2
+
 /// String buffer
 void *qrk_str_malloc (qrk_str_t *buf, qrk_malloc_ctx_t *ctx, size_t initial_size);
 void *qrk_str_resize (qrk_str_t *buf, size_t size);
 void *qrk_str_push_back (qrk_str_t *buf, const char *src, size_t len);
+void *qrk_str_putc (qrk_str_t *buf, char c);
 void *qrk_str_push_front (qrk_str_t *buf, const char *src, size_t len);
 void qrk_str_shift (qrk_str_t *buf, size_t len);
 void *__attribute__((format(printf, 2, 3))) qrk_str_printf (qrk_str_t *buf, const char *fmt, ...);

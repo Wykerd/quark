@@ -129,6 +129,7 @@ int qrk_html_origin_serialize (qrk_str_t *str, qrk_html_origin_tuple_t *tuple);
 int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *input, qrk_url_t *base,
                          qrk_url_t **url, qrk_url_parser_state_t state_override);
 int qrk_url_serialize (qrk_url_t *url, qrk_str_t *str, int exclude_fragment);
+int qrk_url_serialize_path (qrk_url_t *url, qrk_str_t *str);
 int qrk_url_origin (qrk_url_t *url, qrk_html_origin_tuple_t **origin, qrk_malloc_ctx_t *mctx);
 int qrk_url_parser_init (qrk_url_parser_t *parser, qrk_malloc_ctx_t *ctx);
 void qrk_url_free (qrk_url_t *url);
