@@ -40,6 +40,19 @@ void *qrk_str_push_back (qrk_str_t *buf, const char *src, size_t len)
     return sp; 
 }
 
+void *qrk_str_putc (qrk_str_t *buf, char c)
+{
+    if (buf->size < (buf->len + 1))
+        if (!qrk_str_resize(buf, buf->len * QRK_STR_PUTC_GROWTH_FACTOR))
+            return NULL;
+
+    char *sp = buf->base + buf->len;
+    *sp = c;
+    buf->len++;
+
+    return sp;
+}
+
 void *__attribute__((format(printf, 2, 3))) qrk_str_printf (qrk_str_t *buf, const char *fmt, ...)
 {
     va_list ap;
@@ -136,6 +149,21 @@ void *qrk_buf_push_back (qrk_buf_t *buf, const void **src, size_t nmemb) {
 	buf->nmemb += nmemb;
 
 	return sp;
+}
+
+void *qrk_buf_push_back1 (qrk_buf_t *buf, const void *src)
+{
+    if (buf->size < (buf->nmemb + 1))
+        if (!qrk_buf_resize(buf, buf->nmemb + 1))
+            return NULL;
+
+    char *sp = buf->base + (buf->nmemb * buf->memb_size);
+
+    memcpy(sp, src, buf->memb_size);
+
+    buf->nmemb++;
+
+    return sp;
 }
 
 void *qrk_buf_push_front (qrk_buf_t *buf, const void **src, size_t nmemb) {
