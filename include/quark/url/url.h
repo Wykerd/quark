@@ -48,6 +48,7 @@ int qrk_url_host_opaque_parse (qrk_str_t *dest, qrk_rbuf_t *src, int *validation
 int qrk_url_host_parse (qrk_url_host_t *dest, qrk_rbuf_t *src, int is_not_special, int *validation_error);
 int qrk_url_host_serialize (qrk_str_t *dest, qrk_url_host_t *src);
 int qrk_url_host_init (qrk_url_host_t *host, qrk_malloc_ctx_t *ctx);
+int qrk_url_host_clone (qrk_url_host_t *dest, qrk_url_host_t *src);
 void qrk_url_host_free (qrk_url_host_t *host);
 
 #define QRK_URL_HOST_IS_IPV4(host) ((host)->type == QRK_URL_HOST_IPV4)
@@ -56,6 +57,7 @@ void qrk_url_host_free (qrk_url_host_t *host);
 #define QRK_URL_HOST_IS_DOMAIN(host) ((host)->type == QRK_URL_HOST_DOMAIN)
 #define QRK_URL_HOST_IS_OPAQUE(host) ((host)->type == QRK_URL_HOST_OPAQUE)
 
+// TODO: add oom error flag
 typedef enum qrk_url_flags {
     QRK_URL_FLAG_NONE               = 0,
     QRK_URL_FLAG_INVALID            = 1 << 0,
@@ -110,12 +112,27 @@ typedef struct qrk_url_parser_s {
     qrk_url_parser_state_t state;
 } qrk_url_parser_t;
 
+// TODO: this is part of the HTML spec and should be moved
+typedef struct qrk_html_origin_tuple_s {
+    qrk_str_t scheme;
+    qrk_url_host_t host;
+    int32_t port;
+    qrk_str_t domain;
+} qrk_html_origin_tuple_t;
 
+int qrk_html_origin_tuple_init (qrk_html_origin_tuple_t *tuple, qrk_malloc_ctx_t *mctx);
+void qrk_html_origin_tuple_free(qrk_html_origin_tuple_t *tuple);
+int qrk_html_origin_serialize (qrk_str_t *str, qrk_html_origin_tuple_t *tuple);
+
+// TODO: we still need to add blob support
 // TODO: int qrk_url_parse (qrk_url_parser_t *parser, qrk_rbuf_t *url, qrk_url_t *base);
 int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *input, qrk_url_t *base,
                          qrk_url_t **url, qrk_url_parser_state_t state_override);
+int qrk_url_serialize (qrk_url_t *url, qrk_str_t *str, int exclude_fragment);
+int qrk_url_origin (qrk_url_t *url, qrk_html_origin_tuple_t **origin, qrk_malloc_ctx_t *mctx);
 int qrk_url_parser_init (qrk_url_parser_t *parser, qrk_malloc_ctx_t *ctx);
 void qrk_url_free (qrk_url_t *url);
 
+int qrk_url_form_urlencoded_parse (qrk_rbuf_t *src, qrk_buf_t *list, qrk_malloc_ctx_t *mctx);
 
 #endif //QRK_URL_H

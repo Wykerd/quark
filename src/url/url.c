@@ -7,6 +7,8 @@
 #include <math.h>
 #include <uv.h>
 
+#include <quark/no_malloc.h>
+
 const char PERCENT_ENCODING[1024] =
     "%00\0%01\0%02\0%03\0%04\0%05\0%06\0%07\0"
     "%08\0%09\0%0A\0%0B\0%0C\0%0D\0%0E\0%0F\0"
@@ -240,7 +242,7 @@ int qrk_url_port_is_default (qrk_rbuf_t *scheme, int port)
     return 0;
 }
 
-int qrk_url_percent_decode (qrk_str_t *dest, qrk_rbuf_t *src)
+int qrk_url_percent_decode2 (qrk_str_t *dest, qrk_rbuf_t *src, int decode_plus)
 {
     char a, b, ch;
     for (size_t i = 0; i < src->len; i++)
@@ -259,10 +261,15 @@ int qrk_url_percent_decode (qrk_str_t *dest, qrk_rbuf_t *src)
             qrk_str_push_back(dest, &ch, 1);
         }
         else
-            if (!qrk_str_push_back(dest, &src->base[i], 1))
+            if (!qrk_str_push_back(dest, decode_plus && src->base[i] == '+' ? " " : &src->base[i], 1))
                 return 1;
     }
     return 0;
+}
+
+int qrk_url_percent_decode (qrk_str_t *dest, qrk_rbuf_t *src)
+{
+    return qrk_url_percent_decode2(dest, src, 0);
 }
 
 int qrk_url_percent_encode2 (qrk_str_t *dest, const char *src, size_t len, const uint8_t *set)
@@ -524,7 +531,7 @@ int qrk_url_host_ipv6_parse (uint16_t *dest, qrk_rbuf_t *src, int *validation_er
     int pieceIndex = 0;
     int compress = -1;
     const char *c = src->base;
-    const char *end = src->base + src->len;
+    const char *end = src->base + src->len - 1;
 
     if (*c == ':') {
         if (src->len == 1 || (c[1] != ':'))
@@ -705,7 +712,6 @@ int qrk_url_host_opaque_parse (qrk_str_t *dest, qrk_rbuf_t *src, int *validation
     return qrk_url_percent_encode(dest, src, C0_CONTROL_PERCENT_ENCODE_SET);
 }
 
-// TODO: good error codes
 int qrk_url_host_parse (qrk_url_host_t *dest, qrk_rbuf_t *src, int is_not_special, int *validation_error)
 {
     if (src->len == 0)
@@ -777,13 +783,12 @@ fail1:
 
 int qrk_url_host_serialize (qrk_str_t *dest, qrk_url_host_t *src)
 {
-    dest->len = 0;
-
     switch (src->type)
     {
         case QRK_URL_HOST_IPV4:
         {
             uint32_t n = src->ipv4;
+            n = ((n & 0xFF000000) >> 24) | ((n & 0x00FF0000) >> 8) | ((n & 0x0000FF00) << 8) | ((n & 0x000000FF) << 24);
             for (int i = 0; i < 3; i++)
             {
                 qrk_str_printf(dest, "%d.", n % 256);
@@ -874,6 +879,17 @@ int qrk_url_host_init (qrk_url_host_t *host, qrk_malloc_ctx_t *ctx)
     return qrk_str_malloc(&host->str, ctx, 64) == NULL;
 }
 
+int qrk_url_host_clone (qrk_url_host_t *dest, qrk_url_host_t *src)
+{
+    dest->type = src->type;
+    dest->ipv4 = src->ipv4;
+    memcpy(dest->ipv6, src->ipv6, sizeof(dest->ipv6));
+    dest->str.len = 0;
+    if (!qrk_str_push_back(&dest->str, src->str.base, src->str.len))
+        return 1;
+    return 0;
+}
+
 void qrk_url_host_free (qrk_url_host_t *host)
 {
     qrk_str_free(&host->str);
@@ -935,7 +951,9 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
     if (*_url == NULL)
     {
-        *_url = malloc(sizeof(qrk_url_t));
+        *_url = qrk_malloc(parser->m_ctx, sizeof(qrk_url_t));
+        if (*_url == NULL)
+            return 1;
         memset(*_url, 0, sizeof(qrk_url_t));
         (*_url)->port = -1;
 
@@ -1264,11 +1282,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     if (!qrk_str_push_back(&url->password, base->password.base, base->password.len))
                         goto fail;
 
-                    url->host.type = base->host.type;
-                    url->host.ipv4 = base->host.ipv4;
-                    memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
-                    url->host.str.len = 0;
-                    if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                    if (qrk_url_host_clone(&url->host, &base->host))
                         goto fail;
 
                     url->port = base->port;
@@ -1346,11 +1360,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                     if (!qrk_str_push_back(&url->password, base->password.base, base->password.len))
                         goto fail;
 
-                    url->host.type = base->host.type;
-                    url->host.ipv4 = base->host.ipv4;
-                    memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
-                    url->host.str.len = 0;
-                    if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                    if (qrk_url_host_clone(&url->host, &base->host))
                         goto fail;
 
                     url->port = base->port;
@@ -1567,11 +1577,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                 }
                 else if (base && (base->flags & QRK_URL_FLAG_IS_FILE))
                 {
-                    url->host.type = base->host.type;
-                    url->host.ipv4 = base->host.ipv4;
-                    memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
-                    url->host.str.len = 0;
-                    if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                    if (qrk_url_host_clone(&url->host, &base->host))
                         goto fail;
 
                     url->port = base->port;
@@ -1659,12 +1665,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                 {
                     if (base && (base->flags & QRK_URL_FLAG_IS_FILE))
                     {
-                        // TODO: refactor: move host duplication to its own method
-                        url->host.type = base->host.type;
-                        url->host.ipv4 = base->host.ipv4;
-                        memcpy(url->host.ipv6, base->host.ipv6, sizeof(url->host.ipv6));
-                        url->host.str.len = 0;
-                        if (!qrk_str_push_back(&url->host.str, base->host.str.base, base->host.str.len))
+                        if (qrk_url_host_clone(&url->host, &base->host))
                             goto fail;
 
                         if (!qrk_url_path_starts_windows_drive_letter(c, cend) &&
@@ -1962,6 +1963,237 @@ fail1:
     return 1;
 }
 
+int qrk_url_serialize_path (qrk_url_t *url, qrk_str_t *str)
+{
+    if (url->flags & QRK_URL_FLAG_PATH_IS_OPAQUE)
+    {
+        qrk_str_t *path = (qrk_str_t *) qrk_buf_get(&url->path, 0);
+        if (!qrk_str_push_back(str, path->base, path->len))
+            return 1;
+    }
+    else
+    {
+        for (size_t i = 0; i < url->path.nmemb; i++)
+        {
+            qrk_str_t *path_i = (qrk_str_t *) qrk_buf_get(&url->path, i);
+            if (!qrk_str_push_back(str, "/", 1))
+                return 1;
+            if (!qrk_str_push_back(str, path_i->base, path_i->len))
+                return 1;
+        }
+    }
+    return 0;
+}
+
+int qrk_url_serialize (qrk_url_t *url, qrk_str_t *str, int exclude_fragment)
+{
+    if (!qrk_str_push_back(str, url->scheme.base, url->scheme.len))
+        return 1;
+    if (!qrk_str_push_back(str, ":", 1))
+        return 1;
+
+    if (url->host.type != QRK_URL_HOST_NULL)
+    {
+        if (!qrk_str_push_back(str, "//", 2))
+            return 1;
+
+        if (url->flags & QRK_URL_FLAG_HAS_USERNAME)
+        {
+            if (!qrk_str_push_back(str, url->username.base, url->username.len))
+                return 1;
+            if (url->flags & QRK_URL_FLAG_HAS_PASSWORD)
+            {
+                if (!qrk_str_push_back(str, ":", 1))
+                    return 1;
+                if (!qrk_str_push_back(str, url->password.base, url->password.len))
+                    return 1;
+            }
+            if (!qrk_str_push_back(str, "@", 1))
+                return 1;
+        }
+
+        if (qrk_url_host_serialize(str, &url->host))
+            return 1;
+
+        if (url->port != -1)
+        {
+            if (!qrk_str_push_back(str, ":", 1))
+                return 1;
+            if (!qrk_str_printf(str, "%d", url->port))
+                return 1;
+        }
+    }
+
+    if (url->host.type == QRK_URL_HOST_NULL && !(url->flags & QRK_URL_FLAG_PATH_IS_OPAQUE) &&
+        url->path.nmemb > 1 && ((qrk_str_t *) qrk_buf_get(&url->path, 0))->len == 0)
+    {
+        if (!qrk_str_push_back(str, "/.", 2))
+            return 1;
+    }
+
+    if (qrk_url_serialize_path(url, str))
+        return 1;
+
+    if (url->query.len > 0)
+    {
+        if (!qrk_str_push_back(str, "?", 1))
+            return 1;
+        if (!qrk_str_push_back(str, url->query.base, url->query.len))
+            return 1;
+    }
+
+    if (!exclude_fragment)
+    {
+        if (url->fragment.len > 0)
+        {
+            if (!qrk_str_push_back(str, "#", 1))
+                return 1;
+            if (!qrk_str_push_back(str, url->fragment.base, url->fragment.len))
+                return 1;
+        }
+    }
+
+    return 0;
+}
+
+int qrk_html_origin_tuple_init (qrk_html_origin_tuple_t *tuple, qrk_malloc_ctx_t *mctx)
+{
+    memset(tuple, 0, sizeof(qrk_html_origin_tuple_t));
+    if (!qrk_str_malloc(&tuple->scheme, mctx, 5))
+        return 1;
+    if (qrk_url_host_init(&tuple->host, mctx))
+    {
+        qrk_str_free(&tuple->scheme);
+        return 1;
+    }
+    if (!qrk_str_malloc(&tuple->domain, mctx, 1))
+    {
+        qrk_str_free(&tuple->scheme);
+        qrk_url_host_free(&tuple->host);
+        return 1;
+    }
+    return 0;
+}
+
+void qrk_html_origin_tuple_free(qrk_html_origin_tuple_t *tuple)
+{
+    qrk_str_free(&tuple->scheme);
+    qrk_str_free(&tuple->domain);
+    qrk_url_host_free(&tuple->host);
+}
+
+int qrk_html_origin_serialize (qrk_str_t *str, qrk_html_origin_tuple_t *tuple)
+{
+    if (tuple == NULL)
+    {
+        if (!qrk_str_push_back(str, "null", 4))
+            return 1;
+        return 0;
+    }
+
+    if (!qrk_str_push_back(str, tuple->scheme.base, tuple->scheme.len))
+        return 1;
+
+    if (!qrk_str_push_back(str, "://", 3))
+        return 1;
+
+    if (qrk_url_host_serialize(str, &tuple->host))
+        return 1;
+
+    if (tuple->port != -1)
+    {
+        if (!qrk_str_printf(str, ":%d", tuple->port))
+            return 1;
+    }
+
+    return 0;
+}
+
+int qrk_url_origin (qrk_url_t *url, qrk_html_origin_tuple_t **origin, qrk_malloc_ctx_t *mctx)
+{
+    if (url->flags & QRK_URL_FLAG_IS_FILE)
+    {
+        *origin = NULL;
+    }
+    else if (url->flags & QRK_URL_FLAG_SPECIAL)
+    {
+        *origin = qrk_malloc(mctx, sizeof(qrk_html_origin_tuple_t));
+        if (!*origin)
+            return 1;
+        if (qrk_html_origin_tuple_init(*origin, mctx))
+        {
+fail_special:
+            qrk_free(mctx, *origin);
+            *origin = NULL;
+            return 1;
+        }
+        if (qrk_url_host_clone(&(*origin)->host, &url->host))
+            goto fail_special;
+        if (!qrk_str_push_back(&(*origin)->scheme, url->scheme.base, url->scheme.len))
+        {
+            qrk_url_host_free(&(*origin)->host);
+            goto fail_special;
+        }
+        (*origin)->port = url->port;
+    }
+    else if (url->scheme.len == 4 && !memcmp(url->scheme.base, "blob", 4))
+    {
+        // TODO: If url’s blob URL entry is non-null, then return url’s blob URL entry’s environment’s origin.
+        qrk_str_t path;
+
+        if (!qrk_str_malloc(&path, mctx, 1))
+            return 1;
+
+        if (qrk_url_serialize_path(url, &path))
+        {
+            qrk_str_free(&path);
+            return 1;
+        }
+
+        qrk_url_parser_t parser;
+
+        if (qrk_url_parser_init(&parser, mctx))
+        {
+            qrk_str_free(&path);
+            return 1;
+        }
+
+        qrk_url_t *_url = NULL;
+
+        if (qrk_url_parse_basic(&parser, (qrk_rbuf_t *) &path, NULL, &_url, QRK_URL_PARSER_STATE_NO_OVERRIDE))
+        {
+            if (_url != NULL)
+            {
+                qrk_url_free(_url);
+                qrk_free(mctx, _url);
+            }
+            qrk_str_free(&path);
+            *origin = NULL;
+            return 0;
+        }
+
+        int r = qrk_url_origin(_url, origin, mctx);
+
+        if (r)
+        {
+            qrk_url_free(_url);
+            qrk_free(mctx, _url);
+            qrk_str_free(&path);
+            return 1;
+        }
+
+        qrk_url_free(_url);
+        qrk_free(mctx, _url);
+        qrk_str_free(&path);
+    }
+    else
+    {
+        *origin = NULL;
+    }
+
+    return 0;
+}
+
 int qrk_url_parser_init (qrk_url_parser_t *parser, qrk_malloc_ctx_t *ctx)
 {
     memset(parser, 0, sizeof(qrk_url_parser_t));
@@ -1985,4 +2217,110 @@ void qrk_url_free (qrk_url_t *url)
         qrk_str_free((qrk_str_t *)(url->path.base + (i * url->path.memb_size)));
 
     qrk_buf_free(&url->path);
+}
+
+int qrk_url_form_urlencoded_parse (qrk_rbuf_t *src, qrk_buf_t *list, qrk_malloc_ctx_t *mctx)
+{
+    if (!qrk_buf_malloc(list, mctx, sizeof(qrk_kv_t), 1))
+        return 1;
+
+    char *start = src->base;
+    int is_value = 0;
+
+    char *c = src->base;
+    char *end = src->base + src->len;
+
+    while (c <= end)
+    {
+        const char ch = *c;
+
+        if (ch == '&' || c >= end)
+        {
+            if (is_value)
+            {
+                // get last element in the list
+                qrk_kv_t *kv = qrk_buf_get(list, list->nmemb - 1);
+                // set the value
+                qrk_rbuf_t value = {
+                        .base = start,
+                        .len = c - start
+                };
+                if (qrk_url_percent_decode2(&kv->value, &value, 1))
+                    return 1;
+            }
+            else
+            {
+                qrk_kv_t kv;
+                if (!qrk_str_malloc(&kv.key, mctx, c - start))
+                    return 1;
+                if (!qrk_str_malloc(&kv.value, mctx, 64))
+                {
+                    qrk_str_free(&kv.key);
+                    return 1;
+                }
+
+                qrk_rbuf_t key = {
+                        .base = start,
+                        .len = c - start
+                };
+
+                if (qrk_url_percent_decode2(&kv.key, &key, 1))
+                {
+                    qrk_str_free(&kv.key);
+                    qrk_str_free(&kv.value);
+                    return 1;
+                }
+                qrk_kv_t *kv_arr = &kv;
+                if (!qrk_buf_push_back(list, (const void **) &kv_arr, 1))
+                {
+                    qrk_str_free(&kv.key);
+                    qrk_str_free(&kv.value);
+                    return 1;
+                }
+            }
+
+            is_value = 0;
+            start = c + 1;
+        }
+
+        if (c >= end)
+            break;
+
+        if (ch == '=' && !is_value)
+        {
+            is_value = 1;
+            qrk_kv_t kv;
+            if (!qrk_str_malloc(&kv.key, mctx, c - start))
+                return 1;
+            if (!qrk_str_malloc(&kv.value, mctx, 64))
+            {
+                qrk_str_free(&kv.key);
+                return 1;
+            }
+
+            qrk_rbuf_t key = {
+                .base = start,
+                .len = c - start
+            };
+
+            if (qrk_url_percent_decode2(&kv.key, &key, 1))
+            {
+                qrk_str_free(&kv.key);
+                qrk_str_free(&kv.value);
+                return 1;
+            }
+            qrk_kv_t *kv_arr = &kv;
+            if (!qrk_buf_push_back(list, (const void **) &kv_arr, 1))
+            {
+                qrk_str_free(&kv.key);
+                qrk_str_free(&kv.value);
+                return 1;
+            }
+            start = c + 1;
+        }
+
+        c++;
+    }
+
+    return 0;
 }
