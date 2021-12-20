@@ -8,3 +8,7 @@ build/
 *.so
 *.dylib
 .DS_Store
+# v8 files
+.gclient*
+.cipd/
+deps/v8/
