@@ -79,4 +79,9 @@ int qrk_utf8_isascii (const char *s);
 
 int qrk_infra_split_strict_static (qrk_rbuf_t *string, uint32_t delimiter, size_t *tokens, size_t max_tokens);
 
+typedef struct qrk_kv_s {
+  qrk_str_t key;
+  qrk_str_t value;
+} qrk_kv_t;
+
 #endif
