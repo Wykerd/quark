@@ -135,5 +135,6 @@ int qrk_url_parser_init (qrk_url_parser_t *parser, qrk_malloc_ctx_t *ctx);
 void qrk_url_free (qrk_url_t *url);
 
 int qrk_url_form_urlencoded_parse (qrk_rbuf_t *src, qrk_buf_t *list, qrk_malloc_ctx_t *mctx);
+int qrk_url_form_urlencoded_serialize (qrk_str_t *dest, qrk_buf_t *list);
 
 #endif //QRK_URL_H

@@ -11,7 +11,7 @@ typedef struct qrk_malloc_ctx_s qrk_malloc_ctx_t;
  */
 
 /* Must be a power of two */
-#define QRK_HASHMAP_DEFAULT_SIZE   4 // 2**7
+#define QRK_HASHMAP_DEFAULT_SIZE   128 // 2**7
 /* Double table size and rehash when load factor greater than equal to this value */
 #define QRK_MAXIMUM_LOAD_FACTOR    0.7
 

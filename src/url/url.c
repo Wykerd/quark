@@ -176,6 +176,25 @@ const uint8_t COMPONENT_PERCENT_ENCODE_SET[256] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
 };
 
+const uint8_t FORM_URLENCODED_PERCENT_ENCODE_SET[256] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+};
+
 const uint8_t FORBIDDEN_HOST_CODE_POINT[256] = {
     1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -929,7 +948,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
     if (*_url == NULL)
     {
-        *_url = qrk_malloc(parser->m_ctx, sizeof(qrk_url_t));
+        *_url = qrk_malloc(parser->m_ctx, sizeof(qrk_url_t));;
         if (*_url == NULL)
             return 1;
         memset(*_url, 0, sizeof(qrk_url_t));
@@ -1039,7 +1058,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
                         int is_special = qrk_url_scheme_is_special((qrk_rbuf_t *) &buffer);
 
                         // if buffer is special does not match url is special:
-                        if (is_special != (url->flags & QRK_URL_FLAG_SPECIAL))
+                        if (is_special != ((url->flags & QRK_URL_FLAG_SPECIAL) != 0))
                             goto ret;
 
                         // if buffer is file and url includes credentials or has non-null port:
@@ -2288,5 +2307,25 @@ int qrk_url_form_urlencoded_parse (qrk_rbuf_t *src, qrk_buf_t *list, qrk_malloc_
         c++;
     }
 
+    return 0;
+}
+
+int qrk_url_form_urlencoded_serialize (qrk_str_t *dest, qrk_buf_t *list)
+{
+    for (size_t i = 0; i < list->nmemb; i++)
+    {
+        qrk_kv_t *kv = qrk_buf_get(list, i);
+        if (dest->len != 0)
+        {
+            if (!qrk_str_putc(dest, '&'))
+                return 1;
+        }
+        if (qrk_url_percent_encode(dest, (qrk_rbuf_t *) &kv->key, FORM_URLENCODED_PERCENT_ENCODE_SET))
+            return 1;
+        if (!qrk_str_putc(dest, '='))
+            return 1;
+        if (qrk_url_percent_encode(dest, (qrk_rbuf_t *) &kv->value, FORM_URLENCODED_PERCENT_ENCODE_SET))
+            return 1;
+    }
     return 0;
 }

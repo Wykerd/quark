@@ -10,6 +10,7 @@ option(MEMLEAK_STACKTRACES "Include stack traces for memory leaks on linux syste
 option(QRK_BUILD_NET "Build the networking libraries" ON)
 option(QRK_BUILD_CRYPTO "Build the cryptography libraries" ON)
 option(QRK_BUILD_URL "Build the WHATWG URL library" ON)
+option(QRK_BUILD_QJS "Build the QuickJS Runtime" ON)
 
 add_subdirectory(deps/libuv)
 add_subdirectory(deps/llhttp)
@@ -119,6 +120,46 @@ if (QRK_BUILD_NET)
         quarkcrypto
         llhttp
         uv_a
+    )
+endif()
+
+if (QRK_BUILD_QJS)
+    add_subdirectory(deps/quickjs)
+
+    add_library(quarkjs-qjs
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/quickjs/vm.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/quickjs/module.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/quickjs/utils.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/quickjs/mod/url.c
+    )
+
+    set_target_properties(quarkjs-qjs PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+    )
+
+    target_include_directories(quarkjs-qjs PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/quickjs/include
+    )
+
+    target_link_libraries(quarkjs-qjs PUBLIC
+        quarkstd
+        quarkurl
+        qjs
+    )
+
+    add_executable(quarkjs-qjs-cli
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/quickjs/cli.c
+    )
+
+    set_target_properties(quarkjs-qjs-cli PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+    )
+
+    target_link_libraries(quarkjs-qjs-cli PUBLIC
+        quarkjs-qjs
     )
 endif()
 

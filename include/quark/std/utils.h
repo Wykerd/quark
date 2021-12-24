@@ -42,6 +42,10 @@
 #  define htobe64(x) _byteswap_uint64(x)
 #endif
 
+#ifndef countof
+#define countof(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
 /**
  * Quickly check whether a string is utf-8
  */
