@@ -1039,6 +1039,9 @@ int JS_SetModuleExport(JSContext *ctx, JSModuleDef *m, const char *export_name,
 int JS_SetModuleExportList(JSContext *ctx, JSModuleDef *m,
                            const JSCFunctionListEntry *tab, int len);
 
+/* XXX: this is a patch to expose iterator prototype */
+JSValue JS_GetIteratorPrototype(JSContext *ctx);
+
 #undef js_unlikely
 #undef js_force_inline
 

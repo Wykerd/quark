@@ -6322,6 +6322,12 @@ JSValue JS_GetGlobalObject(JSContext *ctx)
     return JS_DupValue(ctx, ctx->global_obj);
 }
 
+/* XXX: This is a patch for getting the iterator prototype */
+JSValue JS_GetIteratorPrototype(JSContext *ctx)
+{
+    return JS_DupValue(ctx, ctx->iterator_proto);
+}
+
 /* WARNING: obj is freed */
 JSValue JS_Throw(JSContext *ctx, JSValue obj)
 {
