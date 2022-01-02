@@ -1,4 +1,6 @@
-![Quark](/Quark.png)
+<div align='center'>
+  <img src="Quark.png" alt="Quark" width='700' />
+</div>
 <p align='center'>Modular implementations of various Web Standards.</p> 
 
 # Dependencies
