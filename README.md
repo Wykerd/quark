@@ -1,5 +1,5 @@
-# Quark
-Modular implementations of various Web Standards. 
+![Quark](/Quark.png)
+<p align='center'>Modular implementations of various Web Standards.</p> 
 
 # Dependencies
 
