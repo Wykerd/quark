@@ -601,7 +601,10 @@ static JSValue qrk_qjs_url_set_search (JSContext *ctx, JSValueConst this_val, JS
     if (search_rbuf.len != 0)
     {
         if (search_rbuf.base[0] == '?')
+        {
             search_rbuf.base++;
+            search_rbuf.len--;
+        }
     }
 
     qrk_qjs_urlsearchparams_ctx_t *params = JS_GetOpaque(url_ctx->search_params, qrk_qjs_urlsearchparams_class_id);

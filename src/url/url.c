@@ -453,7 +453,13 @@ int qrk_url_host_ipv4_number (uint32_t *dest, const char *src, size_t len, int *
         }
         cur++;
     }
-    *dest = strtoul(src, NULL, r);
+    char src_buf[64] = {0};
+    if (len >= sizeof(src_buf))
+        return 1;
+
+    memcpy(src_buf, src, len);
+
+    *dest = strtoul(src_buf, NULL, r);
     return 0;
 }
 
@@ -992,7 +998,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
     qrk_str_t input;
 
-    if (!qrk_str_malloc(&input, parser->m_ctx, end - p + 1))
+    if (!qrk_str_malloc(&input, parser->m_ctx, end - p + 2))
         return 1;
 
     for (char *c = p; c <= end; c++)
@@ -1007,6 +1013,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
         parser->state = QRK_URL_PARSER_STATE_SCHEME_START;
 
     qrk_str_t buffer;
+    input.base[input.len] = -1; // end of string marker
 
     if (!qrk_str_malloc(&buffer, parser->m_ctx, input.len))
         goto fail1;
@@ -1215,7 +1222,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
             case QRK_URL_PARSER_STATE_SPECIAL_RELATIVE_OR_AUTHORITY:
             {
-                if (*c == '/' && c < cend & c[1] == '/')
+                if ((c < cend) && *c == '/' && c[1] == '/')
                 {
                     parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES;
                     c++;
@@ -1368,7 +1375,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
 
             case QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_SLASHES:
             {
-                if (*c == '/' && c < cend && c[1] == '/')
+                if ((c < cend) && *c == '/' && c[1] == '/')
                 {
                     parser->state = QRK_URL_PARSER_STATE_SPECIAL_AUTHORITY_IGNORE_SLASHES;
                     c++;
@@ -1893,7 +1900,7 @@ int qrk_url_parse_basic (qrk_url_parser_t *parser, qrk_rbuf_t *_input, qrk_url_t
             case QRK_URL_PARSER_STATE_QUERY:
             {
                 // XXX: We assume encoding is UTF-8.
-                if ((!state_override && *c == '#') || (c > cend))
+                if ((c > cend) || (!state_override && *c == '#'))
                 {
                     if (qrk_url_percent_encode2(&url->query, buffer.base, buffer.len,
                                                 (url->flags & QRK_URL_FLAG_SPECIAL) ?
@@ -2220,10 +2227,10 @@ int qrk_url_form_urlencoded_parse (qrk_rbuf_t *src, qrk_buf_t *list, qrk_malloc_
 
     while (c <= end)
     {
-        const char ch = *c;
-
-        if (ch == '&' || c >= end)
+        if (c >= end || *c == '&')
         {
+            const char ch = *c;
+
             if (is_value)
             {
                 // get last element in the list
@@ -2273,7 +2280,7 @@ int qrk_url_form_urlencoded_parse (qrk_rbuf_t *src, qrk_buf_t *list, qrk_malloc_
         if (c >= end)
             break;
 
-        if (ch == '=' && !is_value)
+        if (*c == '=' && !is_value)
         {
             is_value = 1;
             qrk_kv_t kv;

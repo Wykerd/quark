@@ -21,8 +21,14 @@ int main (int argc, char **argv)
         return 1;
 
     qrk_rbuf_t script = {
-        .base = "let url = new URL('https://netflix.com/watch/1234?trackid=4321'); url.protocol = 'http'; url.hash = 'daniel'; print(url.toString());  "
-                "url.host = 'wulfaria.dev'; print(url.origin);",
+        .base = "let url = new URL('https://netflix.com/watch/1234?trackid=4321'); "
+                "url.protocol = 'http'; "
+                "url.hash = 'daniel'; "
+                "url.search = '?testid=4321'; "
+                "url.pathname = '/test/path'; "
+                "print(url.toString()); "
+                "url.host = '192.168.1.252'; "
+                "print(url.origin); ",
     };
 
     script.len = strlen(script.base);
@@ -39,6 +45,8 @@ int main (int argc, char **argv)
     qrk_qjs_rt_loop(&rt);
 
     qrk_qjs_rt_free(&rt);
+
+    qrk_malloc_ctx_free(&mctx);
 
     qrk_malloc_ctx_dump_leaks(&mctx);
 }

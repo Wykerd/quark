@@ -137,23 +137,22 @@ int qrk_utf8_isascii (const char *s)
 int qrk_infra_split_strict_static (qrk_rbuf_t *string, uint32_t delimiter, size_t *tokens, size_t max_tokens)
 {
     const char *s = string->base;
-    const char *end = string->base + string->len;
+    const char *end = string->base + string->len - 1;
     uint32_t codepoint;
     uint32_t state = 0;
     int token = 0;
 
-    for (; *s; ++s)
-        if (s >= end)
-        {
-            break;
-        }
-        else if (!qrk_utf8_decode(&state, &codepoint, *s))
+    while (s <= end)
+    {
+        if (!qrk_utf8_decode(&state, &codepoint, *s))
             if (codepoint == delimiter)
             {
                 if (++token > max_tokens)
                     return -1;
                 tokens[token - 1] = s - string->base; // index of delimiter
             }
+        ++s;
+    }
 
     if (++token > max_tokens)
         return -1;
