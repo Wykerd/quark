@@ -28,7 +28,8 @@ int main (int argc, char **argv)
                 "url.pathname = '/test/path'; "
                 "print(url.toString()); "
                 "url.host = '192.168.1.252'; "
-                "print(url.origin); ",
+                "print(url.origin); "
+                "print(JSON.stringify([...url.searchParams]));",
     };
 
     script.len = strlen(script.base);

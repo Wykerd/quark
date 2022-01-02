@@ -42,6 +42,13 @@
 #  define htobe64(x) _byteswap_uint64(x)
 #endif
 
+// from quickjs source, for iterator implementations
+typedef enum JSIteratorKindEnum {
+    JS_ITERATOR_KIND_KEY,
+    JS_ITERATOR_KIND_VALUE,
+    JS_ITERATOR_KIND_KEY_AND_VALUE,
+} JSIteratorKindEnum;
+
 #ifndef countof
 #define countof(x) (sizeof(x) / sizeof((x)[0]))
 #endif

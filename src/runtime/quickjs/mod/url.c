@@ -4,9 +4,11 @@
 #include <quark/url/url.h>
 #include <quickjs.h>
 #include <string.h>
+#include <stdlib.h>
 
 static JSClassID qrk_qjs_url_class_id;
 static JSClassID qrk_qjs_urlsearchparams_class_id;
+static JSClassID qrk_qjs_urlsearchparams_iterator_class_id;
 
 typedef struct qrk_qjs_url_ctx_s {
     qrk_url_parser_t parser;
@@ -19,6 +21,12 @@ typedef struct qrk_qjs_urlsearchparams_ctx_s {
     qrk_buf_t list;
     qrk_qjs_url_ctx_t *parent;
 } qrk_qjs_urlsearchparams_ctx_t;
+
+typedef struct qrk_qjs_search_iter_ctx_t {
+    qrk_qjs_urlsearchparams_ctx_t *uctx;
+    size_t i;
+    JSIteratorKindEnum kind;
+} qrk_qjs_search_iter_ctx_t;
 
 static void qrk_qjs_url_finalizer(JSRuntime *rt, JSValue val)
 {
@@ -48,6 +56,15 @@ static void qrk_qjs_urlsearchparams_finalizer (JSRuntime *rt, JSValue val)
     }
 }
 
+static void qrk_qjs_search_iterator_finalizer (JSRuntime *rt, JSValue val)
+{
+    qrk_qjs_search_iter_ctx_t *url_ctx = JS_GetOpaque(val, qrk_qjs_urlsearchparams_iterator_class_id);
+    qrk_qjs_rt_t *qrt = JS_GetRuntimeOpaque(rt);
+    if (likely(url_ctx)) {
+        qrk_free(qrt->mctx, url_ctx);
+    }
+}
+
 static void qrk_qjs_url_mark (JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
 {
     qrk_qjs_url_ctx_t *url_ctx = JS_GetOpaque(val, qrk_qjs_url_class_id);
@@ -65,6 +82,11 @@ static JSClassDef qrk_qjs_url_class = {
 static JSClassDef qrk_qjs_urlsearchparams_class = {
     "URLSearchParams",
     .finalizer = qrk_qjs_urlsearchparams_finalizer
+};
+
+static JSClassDef qrk_qjs_urlsearchparams_iterator_class = {
+    "URLSearchParams Iterator",
+    .finalizer = qrk_qjs_search_iterator_finalizer
 };
 
 static JSValue qrk_qjs_url_stringifier (JSContext *ctx, JSValueConst this_val)
@@ -740,25 +762,468 @@ static const JSCFunctionListEntry qrk_qjs_url_proto_funcs[] = {
     JS_CFUNC_DEF("toJSON", 0, qrk_qjs_url_stringifier_func)
 };
 
-static JSCFunctionListEntry qrk_qjs_urlsearchparams_proto_funcs[] = {
+static void qrk_qjs_search_update (JSContext *ctx, qrk_qjs_urlsearchparams_ctx_t *uctx)
+{
+    if (uctx->parent == NULL)
+        return;
 
+    uctx->parent->url->query.len = 0;
+
+    if (!qrk_url_form_urlencoded_serialize(&uctx->parent->url->query, &uctx->list))
+        JS_ThrowOutOfMemory(ctx);
 };
 
-static int qrk_qjs_urlsearchparams_update_query (qrk_qjs_urlsearchparams_ctx_t *ctx)
+static JSValue qrk_qjs_search_append (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    if (!ctx->parent)
-        return 0;
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
 
-    ctx->parent->url->query.len = 0;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "Failed to execute 'append' on 'URLSearchParams': 2 arguments required, but only 0 present.");
 
-    if (qrk_url_form_urlencoded_serialize(&ctx->parent->url->query, &ctx->list))
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (unlikely(key == NULL))
+        return JS_EXCEPTION;
+    const char *val = JS_ToCString(ctx, argv[1]);
+    if (unlikely(val == NULL))
     {
-        ctx->parent->url->query.len = 0;
-        return -1;
+        JS_FreeCString(ctx, key);
+        return JS_EXCEPTION;
     }
 
-    return 0;
+    size_t key_len = strlen(key);
+    size_t val_len = strlen(val);
+
+    qrk_kv_t kv;
+    if (!qrk_str_malloc(&kv.key, uctx->list.m_ctx, key_len))
+        goto oom;
+    if (!qrk_str_malloc(&kv.value, uctx->list.m_ctx, val_len))
+    {
+        qrk_str_free(&kv.key);
+        goto oom;
+    }
+
+    memcpy(kv.key.base, key, key_len);
+    memcpy(kv.value.base, val, val_len);
+    kv.key.len = key_len;
+    kv.value.len = val_len;
+
+    if (!qrk_buf_push_back1(&uctx->list, &kv))
+    {
+        qrk_str_free(&kv.key);
+        qrk_str_free(&kv.value);
+        goto oom;
+    }
+
+    qrk_qjs_search_update(ctx, uctx);
+    return JS_UNDEFINED;
+oom:
+    JS_FreeCString(ctx, key);
+    JS_FreeCString(ctx, val);
+    return JS_ThrowOutOfMemory(ctx);
 }
+
+static JSValue qrk_qjs_search_delete (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "Failed to execute 'delete' on 'URLSearchParams': 1 argument required, but only 0 present.");
+
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (unlikely(key == NULL))
+        return JS_EXCEPTION;
+
+    size_t key_len = strlen(key);
+
+    for (size_t i = 0; i < uctx->list.nmemb; i++)
+    {
+        qrk_kv_t *kv = uctx->list.base + (i * uctx->list.memb_size);
+        if (kv->key.len == key_len && !memcmp(kv->key.base, key, key_len))
+        {
+            qrk_str_free(&kv->key);
+            qrk_str_free(&kv->value);
+            qrk_buf_remove(&uctx->list, i);
+            i--;
+        }
+    }
+
+    JS_FreeCString(ctx, key);
+    qrk_qjs_search_update(ctx, uctx);
+
+    return JS_UNDEFINED;
+}
+
+static JSValue qrk_qjs_search_get (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "Failed to execute 'get' on 'URLSearchParams': 1 argument required, but only 0 present.");
+
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (unlikely(key == NULL))
+        return JS_EXCEPTION;
+
+    size_t key_len = strlen(key);
+
+    for (size_t i = 0; i < uctx->list.nmemb; i++)
+    {
+        qrk_kv_t *kv = uctx->list.base + (i * uctx->list.memb_size);
+        if (kv->key.len == key_len && !memcmp(kv->key.base, key, key_len))
+        {
+            JS_FreeCString(ctx, key);
+            return JS_NewStringLen(ctx, kv->value.base, kv->value.len);
+        }
+    }
+
+    JS_FreeCString(ctx, key);
+
+    return JS_UNDEFINED;
+}
+
+static JSValue qrk_qjs_search_get_all (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "Failed to execute 'getAll' on 'URLSearchParams': 1 argument required, but only 0 present.");
+
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (unlikely(key == NULL))
+        return JS_EXCEPTION;
+
+    size_t key_len = strlen(key);
+
+    JSValue arr = JS_NewArray(ctx);
+
+    int64_t idx = 0;
+
+    for (size_t i = 0; i < uctx->list.nmemb; i++)
+    {
+        qrk_kv_t *kv = uctx->list.base + (i * uctx->list.memb_size);
+        if (kv->key.len == key_len && !memcmp(kv->key.base, key, key_len))
+        {
+            JS_SetPropertyInt64(ctx, arr, idx++, JS_NewStringLen(ctx, kv->value.base, kv->value.len));
+        }
+    }
+
+    JS_FreeCString(ctx, key);
+
+    return arr;
+}
+
+static JSValue qrk_qjs_search_has (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "Failed to execute 'has' on 'URLSearchParams': 1 argument required, but only 0 present.");
+
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (unlikely(key == NULL))
+        return JS_EXCEPTION;
+
+    size_t key_len = strlen(key);
+
+    for (size_t i = 0; i < uctx->list.nmemb; i++)
+    {
+        qrk_kv_t *kv = uctx->list.base + (i * uctx->list.memb_size);
+        if (kv->key.len == key_len && !memcmp(kv->key.base, key, key_len))
+        {
+            JS_FreeCString(ctx, key);
+            return JS_TRUE;
+        }
+    }
+
+    JS_FreeCString(ctx, key);
+
+    return JS_FALSE;
+}
+
+static JSValue qrk_qjs_search_set (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "Failed to execute 'set' on 'URLSearchParams': 2 arguments required, but only 0 present.");
+
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (unlikely(key == NULL))
+        return JS_EXCEPTION;
+    const char *val = JS_ToCString(ctx, argv[1]);
+    if (unlikely(val == NULL))
+    {
+        JS_FreeCString(ctx, key);
+        return JS_EXCEPTION;
+    }
+
+    size_t key_len = strlen(key);
+    size_t val_len = strlen(val);
+
+    size_t idx = -1;
+
+    for (size_t i = 0; i < uctx->list.nmemb; i++)
+    {
+        qrk_kv_t *kv = uctx->list.base + (i * uctx->list.memb_size);
+        if (kv->key.len == key_len && !memcmp(kv->key.base, key, key_len))
+        {
+            kv->value.len = 0;
+            if (!qrk_str_puts(&kv->value, val))
+                goto oom;
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx != -1)
+        for (size_t i = idx + 1; i < uctx->list.nmemb; i++)
+        {
+            qrk_kv_t *kv = uctx->list.base + (i * uctx->list.memb_size);
+            if (kv->key.len == key_len && !memcmp(kv->key.base, key, key_len))
+            {
+                qrk_str_free(&kv->key);
+                qrk_str_free(&kv->value);
+                qrk_buf_remove(&uctx->list, i);
+                i--;
+            }
+        }
+    else
+    {
+        qrk_kv_t kv;
+        if (!qrk_str_malloc(&kv.key, uctx->list.m_ctx, key_len))
+            goto oom;
+        if (!qrk_str_malloc(&kv.value, uctx->list.m_ctx, val_len))
+        {
+            qrk_str_free(&kv.key);
+            goto oom;
+        }
+
+        memcpy(kv.key.base, key, key_len);
+        memcpy(kv.value.base, val, val_len);
+        kv.key.len = key_len;
+        kv.value.len = val_len;
+
+        if (!qrk_buf_push_back1(&uctx->list, &kv))
+        {
+            qrk_str_free(&kv.key);
+            qrk_str_free(&kv.value);
+            goto oom;
+        }
+    }
+
+    JS_FreeCString(ctx, key);
+    JS_FreeCString(ctx, val);
+    qrk_qjs_search_update(ctx, uctx);
+
+    return JS_UNDEFINED;
+oom:
+    JS_FreeCString(ctx, key);
+    JS_FreeCString(ctx, val);
+    return JS_ThrowOutOfMemory(ctx);
+}
+
+// TODO: move to utils
+static int qrK_qjs_str_cmp (const void *a, const void *b)
+{
+    const qrk_kv_t *kv_a = a;
+    const qrk_kv_t *kv_b = b;
+
+    size_t min_len = kv_a->key.len < kv_b->key.len ? kv_a->key.len : kv_b->key.len;
+
+    int cmp = memcmp(kv_a->key.base, kv_b->key.base, min_len);
+
+    if (cmp == 0)
+    {
+        if (kv_a->key.len < kv_b->key.len)
+            return -1;
+        else if (kv_a->key.len > kv_b->key.len)
+            return 1;
+        else
+            return 0;
+    }
+
+    return cmp;
+}
+
+static JSValue qrk_qjs_search_sort (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    // TODO: locale sorting with icu ucol
+    qsort(uctx->list.base, uctx->list.nmemb, uctx->list.memb_size, qrK_qjs_str_cmp);
+
+    qrk_qjs_search_update(ctx, uctx);
+    return JS_UNDEFINED;
+}
+
+static JSValue qrk_qjs_search_stringifier (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    size_t initial_len = uctx->parent != NULL ? uctx->parent->url->query.len : uctx->list.nmemb * 64;
+
+    qrk_str_t str;
+
+    if (!qrk_str_malloc(&str, uctx->list.m_ctx, initial_len))
+        return JS_ThrowOutOfMemory(ctx);
+
+    if (!qrk_url_form_urlencoded_serialize(&str, &uctx->list))
+    {
+        qrk_str_free(&str);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+
+    JSValue ret = JS_NewStringLen(ctx, str.base, str.len);
+    qrk_str_free(&str);
+
+    return ret;
+}
+
+static int check_function(JSContext *ctx, JSValueConst obj)
+{
+    if (likely(JS_IsFunction(ctx, obj)))
+        return 0;
+    JS_ThrowTypeError(ctx, "not a function");
+    return -1;
+}
+
+static JSValue qrk_qjs_search_for_each (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    JSValueConst func, this_arg;
+    JSValue ret, args[3];
+
+    func = argv[0];
+    if (argc > 1)
+        this_arg = argv[1];
+    else
+        this_arg = JS_UNDEFINED;
+    if (check_function(ctx, func))
+        return JS_EXCEPTION;
+
+    for (size_t i = 0; i < uctx->list.nmemb; i++)
+    {
+        qrk_kv_t *kv = uctx->list.base + (i * uctx->list.memb_size);
+        /* must duplicate in case the record is deleted */
+        args[0] = JS_NewStringLen(ctx, kv->value.base, kv->value.len);
+        args[1] = JS_NewStringLen(ctx, kv->key.base, kv->key.len);
+        args[2] = (JSValue)this_val;
+        ret = JS_Call(ctx, func, this_arg, 3, (JSValueConst *)args);
+        JS_FreeValue(ctx, args[0]);
+        JS_FreeValue(ctx, args[1]);
+        if (JS_IsException(ret))
+            return ret;
+        JS_FreeValue(ctx, ret);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue qrk_qjs_create_search_iterator(JSContext *ctx, JSValueConst this_val,
+                                              int argc, JSValueConst *argv, int magic)
+{
+    qrk_qjs_urlsearchparams_ctx_t *uctx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_class_id);
+    if (unlikely(!uctx))
+        return JS_EXCEPTION;
+
+    qrk_qjs_rt_t *qrt = JS_GetContextOpaque(ctx);
+
+    qrk_qjs_search_iter_ctx_t *ictx = qrk_malloc(qrt->mctx, sizeof(qrk_qjs_search_iter_ctx_t));
+    if (ictx == NULL)
+        return JS_ThrowOutOfMemory(ctx);
+
+    JSValue obj = JS_NewObjectClass(ctx, (int)qrk_qjs_urlsearchparams_iterator_class_id);
+    if (JS_IsException(obj))
+    {
+        qrk_free(qrt->mctx, ictx);
+        return obj;
+    }
+
+    ictx->uctx = uctx;
+    ictx->i = 0;
+    ictx->kind = magic;
+
+    JS_SetOpaque(obj, ictx);
+
+    return obj;
+}
+
+static JSCFunctionListEntry qrk_qjs_urlsearchparams_proto_funcs[] = {
+    JS_CFUNC_DEF("append", 2, qrk_qjs_search_append),
+    JS_CFUNC_DEF("delete", 1, qrk_qjs_search_delete),
+    JS_CFUNC_DEF("get", 1, qrk_qjs_search_get),
+    JS_CFUNC_DEF("getAll", 1, qrk_qjs_search_get_all),
+    JS_CFUNC_DEF("has", 1, qrk_qjs_search_has),
+    JS_CFUNC_DEF("set", 2, qrk_qjs_search_set),
+    JS_CFUNC_DEF("sort", 0, qrk_qjs_search_sort),
+    // stringifier
+    JS_CFUNC_DEF("toString", 0, qrk_qjs_search_stringifier),
+    // iterable<USVString, USVString>
+    JS_CFUNC_DEF("forEach", 1, qrk_qjs_search_for_each),
+    JS_CFUNC_MAGIC_DEF("values", 0, qrk_qjs_create_search_iterator, JS_ITERATOR_KIND_VALUE ),
+    JS_CFUNC_MAGIC_DEF("[Symbol.iterator]", 0, qrk_qjs_create_search_iterator, JS_ITERATOR_KIND_KEY_AND_VALUE ),
+    JS_CFUNC_MAGIC_DEF("keys", 0, qrk_qjs_create_search_iterator, JS_ITERATOR_KIND_KEY ),
+    JS_CFUNC_MAGIC_DEF("entries", 0, qrk_qjs_create_search_iterator, JS_ITERATOR_KIND_KEY_AND_VALUE ),
+};
+
+static JSValue qrk_qjs_search_next(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv,
+                                  int *pdone, int magic)
+{
+    qrk_qjs_search_iter_ctx_t *ictx = JS_GetOpaque(this_val, qrk_qjs_urlsearchparams_iterator_class_id);
+    if (unlikely(!ictx))
+        return JS_EXCEPTION;
+
+    if (ictx->i >= ictx->uctx->list.nmemb)
+        goto done;
+
+    qrk_kv_t *kv = ictx->uctx->list.base + (ictx->i * ictx->uctx->list.memb_size);
+    JSValue ret;
+    switch (ictx->kind) {
+        case JS_ITERATOR_KIND_VALUE:
+            ret = JS_NewStringLen(ctx, kv->value.base, kv->value.len);
+            break;
+        case JS_ITERATOR_KIND_KEY:
+            ret = JS_NewStringLen(ctx, kv->key.base, kv->key.len);
+            break;
+        case JS_ITERATOR_KIND_KEY_AND_VALUE:
+            ret = JS_NewArray(ctx);
+            if (JS_IsException(ret))
+                return ret;
+            JS_SetPropertyUint32(ctx, ret, 0, JS_NewStringLen(ctx, kv->key.base, kv->key.len));
+            JS_SetPropertyUint32(ctx, ret, 1, JS_NewStringLen(ctx, kv->value.base, kv->value.len));
+            break;
+    }
+    ictx->i++;
+    *pdone = 0;
+    return ret;
+done:
+    *pdone = 1;
+    return JS_UNDEFINED;
+}
+
+static JSCFunctionListEntry qrk_qjs_urlsearchparams_iterator_proto_funcs[] = {
+    JS_ITERATOR_NEXT_DEF("next", 0, qrk_qjs_search_next, 0),
+    JS_PROP_STRING_DEF("[Symbol.toStringTag]", "URLSearchParams Iterator", JS_PROP_CONFIGURABLE)
+};
 
 static JSValue qrk_qjs_urlseachparams_init_url (JSContext *ctx, qrk_rbuf_t *query, qrk_qjs_url_ctx_t *parent)
 {
@@ -832,7 +1297,7 @@ static JSValue qrk_qjs_urlsearchparams_ctor (JSContext *ctx, JSValueConst new_ta
                 if (!JS_IsArray(ctx, js_item))
                 {
                     JS_FreeValue(ctx, js_item);
-                    ret = JS_ThrowTypeError(ctx, "Failed to construct URLSearchParams: The provided value is not an sequence.");
+                    ret = JS_ThrowTypeError(ctx, "Failed to construct 'URLSearchParams': The provided value is not an sequence.");
                     goto fail;
                 }
 
@@ -850,7 +1315,7 @@ static JSValue qrk_qjs_urlsearchparams_ctor (JSContext *ctx, JSValueConst new_ta
                 if (sub_len != 2)
                 {
                     JS_FreeValue(ctx, js_item);
-                    ret = JS_ThrowTypeError(ctx, "Failed to construct URLSearchParams: Sequence initializer must only contain pair elements.");
+                    ret = JS_ThrowTypeError(ctx, "Failed to construct 'URLSearchParams': Sequence initializer must only contain pair elements.");
                     goto fail;
                 }
 
@@ -1091,7 +1556,7 @@ static JSValue qrk_qjs_url_ctor (JSContext *ctx, JSValueConst new_target,
                     qrk_url_free(base);
                 JS_FreeCString(ctx, base_url);
                 qrk_free(qrt->mctx, url_ctx);
-                return JS_ThrowTypeError(ctx, "Failed to construct URL: Invalid base URL");
+                return JS_ThrowTypeError(ctx, "Failed to construct 'URL': Invalid base URL");
             };
             JS_FreeCString(ctx, base_url);
         }
@@ -1115,7 +1580,7 @@ static JSValue qrk_qjs_url_ctor (JSContext *ctx, JSValueConst new_target,
             qrk_url_free(url_ctx->url);
         JS_FreeCString(ctx, url_str);
         qrk_free(qrt->mctx, url_ctx);
-        return JS_ThrowTypeError(ctx, "Failed to construct URL: Invalid URL");
+        return JS_ThrowTypeError(ctx, "Failed to construct 'URL': Invalid URL");
     }
     JS_FreeCString(ctx, url_str);
     if (base)
@@ -1149,6 +1614,7 @@ int qrk_qjs_url_init (JSContext *ctx)
     if (JS_IsException(global))
         return 1;
 
+    /* URL class */
     JS_NewClassID(&qrk_qjs_url_class_id);
     JS_NewClass(JS_GetRuntime(ctx), qrk_qjs_url_class_id, &qrk_qjs_url_class);
     proto = JS_NewObject(ctx);
@@ -1159,7 +1625,10 @@ int qrk_qjs_url_init (JSContext *ctx)
     JS_SetClassProto(ctx, qrk_qjs_url_class_id, proto);
 
     JS_SetPropertyStr(ctx, global, "URL", obj);
+    // LegacyWindowAlias=webkitURL
+    JS_SetPropertyStr(ctx, global, "webkitURL", JS_DupValue(ctx, obj));
 
+    /* URLSearchParams class */
     JS_NewClassID(&qrk_qjs_urlsearchparams_class_id);
     JS_NewClass(JS_GetRuntime(ctx), qrk_qjs_urlsearchparams_class_id, &qrk_qjs_urlsearchparams_class);
     proto = JS_NewObject(ctx);
@@ -1172,5 +1641,15 @@ int qrk_qjs_url_init (JSContext *ctx)
     JS_SetPropertyStr(ctx, global, "URLSearchParams", obj);
     JS_FreeValue(ctx, global);
 
+    /* URLSearchParams Iterator Class */
+    JS_NewClassID(&qrk_qjs_urlsearchparams_iterator_class_id);
+    JS_NewClass(JS_GetRuntime(ctx), qrk_qjs_urlsearchparams_iterator_class_id, &qrk_qjs_urlsearchparams_iterator_class);
+
+    JSValue iterator_proto = JS_GetIteratorPrototype(ctx);
+    proto = JS_NewObjectProto(ctx, iterator_proto);
+    JS_FreeValue(ctx, iterator_proto);
+    JS_SetPropertyFunctionList(ctx, proto, qrk_qjs_urlsearchparams_iterator_proto_funcs, countof(qrk_qjs_urlsearchparams_iterator_proto_funcs));
+
+    JS_SetClassProto(ctx, qrk_qjs_urlsearchparams_iterator_class_id, proto);
     return 0;
 }
