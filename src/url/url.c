@@ -2,6 +2,7 @@
 #include <quark/std/utils.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unicode/utypes.h>
 #include <unicode/uidna.h>
 #include <math.h>

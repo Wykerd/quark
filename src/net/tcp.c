@@ -2,6 +2,7 @@
 #include <quark/net/dns.h>
 #include <quark/std/utils.h>
 #include <stdlib.h>
+#include <string.h>
 #include <quark/no_malloc.h>
 
 static void qrk__tcp_write_cb(uv_write_t *req, int status)
@@ -20,7 +21,7 @@ static void qrk__tcp_write_cb(uv_write_t *req, int status)
     }
 
     if (tcp->on_write)
-        tcp->on_write(tcp);
+        tcp->on_write((qrk_stream_t *)tcp);
 
 exit:
     qrk_free(tcp->m_ctx, req);
@@ -65,7 +66,7 @@ int qrk_tcp_init(qrk_tcp_t* tcp, qrk_loop_t* loop)
         return r;
 
     tcp->handle.data = tcp;
-    tcp->write = qrk_tcp_write;
+    tcp->write = (qrk_stream_write)qrk_tcp_write;
 
     return 0;
 }
@@ -85,7 +86,7 @@ static void qrk__tcp_connect_cb(uv_connect_t *req, int status)
     }
 
     if (tcp->on_connect)
-        tcp->on_connect(tcp);
+        tcp->on_connect((qrk_stream_t *)tcp);
 exit:
     qrk_free(tcp->m_ctx, req);
 }
@@ -122,7 +123,7 @@ int qrk_tcp_connect(qrk_tcp_t* tcp, const struct sockaddr* addr)
     return 0;
 }
 
-typedef void (*qrk__tcp_resolve_cb)(qrk_tcp_t *sock, struct sockaddr* res);
+typedef int (*qrk__tcp_resolve_cb)(qrk_tcp_t* tcp, const struct sockaddr* addr);
 
 static int qrk__tcp_resolve (qrk_tcp_t *tcp, const char *hostname, const char *port,
                              uv_getaddrinfo_cb resolve_cb, qrk__tcp_resolve_cb sync_resolve_cb)
@@ -136,7 +137,7 @@ static int qrk__tcp_resolve (qrk_tcp_t *tcp, const char *hostname, const char *p
             case 4:
             {
                 struct sockaddr_in addr;
-                r = uv_ip4_addr(hostname, port, &addr);
+                r = uv_ip4_addr(hostname, atoi(port), &addr);
                 if (!r)
                     sync_resolve_cb(tcp, (struct sockaddr *)&addr);
             }
@@ -268,7 +269,7 @@ static void qrk__tcp_read_cb (uv_stream_t *handle, ssize_t nread, const uv_buf_t
             qrk_rbuf_t rbuf = {
                     buf->base, nread
             };
-            tcp->on_read(tcp, &rbuf);
+            tcp->on_read((qrk_stream_t *)tcp, &rbuf);
         }
     }
     else
@@ -313,7 +314,7 @@ static void qrk__tcp_close_cb (uv_handle_t *handle)
 {
     qrk_tcp_t *tcp = handle->data;
     if (tcp->on_close)
-        tcp->on_close(tcp);
+        tcp->on_close((qrk_stream_t *)tcp);
 }
 
 int qrk_tcp_shutdown(qrk_tcp_t* tcp)

@@ -3,6 +3,7 @@
 #include <quark/std/utils.h>
 #include <quark/url/url.h>
 #include <quickjs.h>
+#include <string.h>
 
 static JSClassID qrk_qjs_url_class_id;
 static JSClassID qrk_qjs_urlsearchparams_class_id;

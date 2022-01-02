@@ -2,7 +2,6 @@
 #define QRK_NET_TCP_H
 
 #include <quark/std/stream.h>
-#include <uv.h>
 
 typedef struct qrk_tcp_s qrk_tcp_t;
 

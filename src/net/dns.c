@@ -1,4 +1,5 @@
 #include <quark/net/dns.h>
+#include <quark/std/utils.h>
 #include <netdb.h>
 #include <string.h>
 #include <stdlib.h>

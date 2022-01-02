@@ -1,4 +1,5 @@
 #include <quark/net/tls.h>
+#include <string.h>
 
 static
 int qrk__tls_init_intr(qrk_tls_t *tls, qrk_stream_t *stream) {

@@ -12,6 +12,9 @@ option(QRK_BUILD_CRYPTO "Build the cryptography libraries" ON)
 option(QRK_BUILD_URL "Build the WHATWG URL library" ON)
 option(QRK_BUILD_QJS "Build the QuickJS Runtime" ON)
 
+# enable position independent code
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_subdirectory(deps/libuv)
 add_subdirectory(deps/llhttp)
 find_package(OpenSSL REQUIRED)

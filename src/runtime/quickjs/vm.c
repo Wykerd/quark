@@ -54,7 +54,7 @@ int qrk_qjs_rt_init(qrk_qjs_rt_t *rt, qrk_malloc_ctx_t *mctx, uv_loop_t *loop, i
     JS_AddIntrinsicBigFloat(rt->ctx);
     JS_AddIntrinsicBigDecimal(rt->ctx);
     JS_AddIntrinsicOperators(rt->ctx);
-    JS_EnableBignumExt(rt->ctx, TRUE);
+    JS_EnableBignumExt(rt->ctx, 1);
 
     JS_SetModuleLoaderFunc(rt->rt, NULL, qrk_qjs_module_loader, rt);
 
@@ -169,7 +169,7 @@ int qrk_qjs_eval_buf (qrk_qjs_rt_t *rt, const qrk_rbuf_t *script, const char *sc
         val = JS_Eval(rt->ctx, script->base, script->len, script_name,
                       eval_flags | JS_EVAL_FLAG_COMPILE_ONLY);
         if (!JS_IsException(val)) {
-            qrk_qjs_js_module_set_import_meta(rt->ctx, val, TRUE, TRUE);
+            qrk_qjs_js_module_set_import_meta(rt->ctx, val, 1, 1);
             val = JS_EvalFunction(rt->ctx, val);
         }
     } else {

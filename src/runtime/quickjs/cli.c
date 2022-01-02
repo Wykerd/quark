@@ -1,5 +1,6 @@
 #include <quark/runtime/quickjs/vm.h>
 #include <quark/runtime/quickjs/mod/url.h>
+#include <string.h>
 
 JSValue qrk_qjs_print (JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
