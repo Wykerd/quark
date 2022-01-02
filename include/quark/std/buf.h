@@ -84,6 +84,12 @@ void qrk_buf_free (qrk_buf_t *buf);
  * @return Pointer to element at given index.
  */
 void *qrk_buf_get (qrk_buf_t *buf, size_t i);
+/**
+ * Remove element at given index.
+ * @param buf Target buffer.
+ * @param i Index
+ */
+void qrk_buf_remove (qrk_buf_t *buf, size_t i);
 
 #define QRK_STR_PUTC_GROWTH_FACTOR 2
 

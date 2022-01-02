@@ -201,3 +201,12 @@ void *qrk_buf_get (qrk_buf_t *buf, size_t i) {
 		return NULL;
 	return buf->base + (i * buf->memb_size);
 }
+
+void qrk_buf_remove (qrk_buf_t *buf, size_t i)
+{
+    if (i <= buf->nmemb)
+        return;
+
+    memmove(buf->base + (i * buf->memb_size), buf->base + ((i + 1) * buf->memb_size), (buf->nmemb - i) * buf->memb_size);
+    buf->nmemb--;
+}
