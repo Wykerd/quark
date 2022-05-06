@@ -9,8 +9,17 @@
 #define STRINGIFY_DETAIL(x) #x
 #define STRINGIFY(x) STRINGIFY_DETAIL(x)
 
-#define likely(x)       __builtin_expect(!!(x), 1)
-#define unlikely(x)     __builtin_expect(!!(x), 0)
+#if defined(__GNUC__) || defined(__clang__)
+#define likely(x)          __builtin_expect(!!(x), 1)
+#define unlikely(x)        __builtin_expect(!!(x), 0)
+#define force_inline       inline __attribute__((always_inline))
+#define __printf_like(f, a)   __attribute__((format(printf, f, a)))
+#else
+#define likely(x)     (x)
+#define unlikely(x)   (x)
+#define force_inline  inline
+#define __printf_like(a, b)
+#endif
 
 #if defined(__linux__)
 #  include <endian.h>

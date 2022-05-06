@@ -125,7 +125,7 @@ int qrk_tcp_connect(qrk_tcp_t* tcp, const struct sockaddr* addr)
 
 typedef int (*qrk__tcp_resolve_cb)(qrk_tcp_t* tcp, const struct sockaddr* addr);
 
-static int qrk__tcp_resolve (qrk_tcp_t *tcp, const char *hostname, const char *port,
+static int qrk__tcp_resolve (qrk_tcp_t *tcp, const char *hostname, uint32_t port,
                              uv_getaddrinfo_cb resolve_cb, qrk__tcp_resolve_cb sync_resolve_cb)
 {
     int n = qrk_dns_is_numeric_host_v(hostname);
@@ -137,7 +137,7 @@ static int qrk__tcp_resolve (qrk_tcp_t *tcp, const char *hostname, const char *p
             case 4:
             {
                 struct sockaddr_in addr;
-                r = uv_ip4_addr(hostname, atoi(port), &addr);
+                r = uv_ip4_addr(hostname, (int)port, &addr);
                 if (!r)
                     sync_resolve_cb(tcp, (struct sockaddr *)&addr);
             }
@@ -146,7 +146,7 @@ static int qrk__tcp_resolve (qrk_tcp_t *tcp, const char *hostname, const char *p
             case 6:
             {
                 struct sockaddr_in6 dst;
-                r = uv_ip6_addr(hostname, atoi(port), &dst);
+                r = uv_ip6_addr(hostname, (int)port, &dst);
                 if (!r)
                     sync_resolve_cb(tcp, (struct sockaddr *)&dst);
             }
@@ -200,16 +200,45 @@ static int qrk__tcp_resolve (qrk_tcp_t *tcp, const char *hostname, const char *p
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
+    qrk_str_t port_str;
+    if (qrk_str_malloc(&port_str, tcp->m_ctx, 8) == NULL)
+    {
+        qrk_free(tcp->m_ctx, req);
+        qrk_err_t err = {
+            .code = QRK_E_OOM,
+            .origin = QRK_EO_IMPL,
+            .target = tcp,
+            .target_type = tcp->type
+        };
+        qrk_err_emit(&err);
+    }
+
+    if (qrk_str_printf(&port_str, "%d", port) == NULL || qrk_str_putc(&port_str, '\0') == NULL)
+    {
+        qrk_free(tcp->m_ctx, req);
+        qrk_str_free(&port_str);
+        qrk_err_t err = {
+            .code = QRK_E_OOM,
+            .origin = QRK_EO_IMPL,
+            .target = tcp,
+            .target_type = tcp->type
+        };
+        qrk_err_emit(&err);
+    }
+
     int r = uv_getaddrinfo(
         tcp->loop,
         req,
         resolve_cb,
-        hostname, port,
+        hostname, port_str.base,
         &hints
     );
 
+    qrk_str_free(&port_str);
+
     if (r != 0)
     {
+        qrk_free(tcp->m_ctx, req);
         qrk_err_t err = {
             .code = r,
             .origin = QRK_EO_UV,
@@ -246,9 +275,109 @@ exit:
     qrk_free(tcp->m_ctx, req);
 }
 
-int qrk_tcp_connect_host(qrk_tcp_t* tcp, const char* host, const char *port)
+int qrk_tcp_connect_host(qrk_tcp_t* tcp, const char* host, uint32_t port)
 {
     return qrk__tcp_resolve(tcp, host, port, qrk__tcp_getaddrinfo_cb, qrk_tcp_connect);
+}
+
+int qrk_tcp_bind2(qrk_tcp_t* tcp, const struct sockaddr* addr, unsigned int flags)
+{
+    int r = uv_tcp_bind(&tcp->handle, addr, flags);
+    if (r) {
+        qrk_err_t err = {
+                .code = r,
+                .origin = QRK_EO_UV,
+                .target = tcp,
+                .target_type = tcp->type
+        };
+        qrk_err_emit(&err);
+        return r;
+    }
+    return 0;
+}
+
+int qrk_tcp_bind(qrk_tcp_t* tcp, const struct sockaddr* addr)
+{
+    return qrk_tcp_bind2(tcp, addr, 0);
+}
+
+static void qrk__tcp_getaddrinfo_cb_bind (uv_getaddrinfo_t *req, int status, struct addrinfo *res)
+{
+    qrk_tcp_t *tcp = req->data;
+
+    if (status != 0)
+    {
+        qrk_err_t err = {
+                .code = status,
+                .origin = QRK_EO_UV,
+                .target = tcp,
+                .target_type = tcp->type
+        };
+        qrk_err_emit(&err);
+        goto exit;
+    }
+
+    qrk_tcp_bind(tcp, res->ai_addr);
+
+exit:
+    uv_freeaddrinfo(res);
+    qrk_free(tcp->m_ctx, req);
+}
+
+int qrk_tcp_bind_host(qrk_tcp_t* tcp, const char* host, uint32_t port)
+{
+    return qrk__tcp_resolve(tcp, host, port, qrk__tcp_getaddrinfo_cb_bind, qrk_tcp_bind);
+}
+
+void qrk__tcp_connection_cb(uv_stream_t* server, int status)
+{
+    qrk_tcp_t *tcp = server->data;
+    if (status != 0)
+    {
+        qrk_err_t err = {
+            .code = status,
+            .origin = QRK_EO_UV,
+            .target = tcp,
+            .target_type = tcp->type
+        };
+        qrk_err_emit(&err);
+        return;
+    }
+
+    if (tcp->on_connection)
+        tcp->on_connection((qrk_stream_t *)tcp);
+}
+
+int qrk_tcp_accept(qrk_tcp_t *server, qrk_tcp_t *client)
+{
+    int r = uv_accept((uv_stream_t*)&server->handle, (uv_stream_t*)&client->handle);
+    if (r) {
+        qrk_err_t err = {
+            .code = r,
+            .origin = QRK_EO_UV,
+            .target = server,
+            .target_type = server->type
+        };
+        qrk_err_emit(&err);
+        return r;
+    }
+    return 0;
+}
+
+int qrk_tcp_listen(qrk_tcp_t* tcp, int backlog)
+{
+    int r = uv_listen((uv_stream_t*)&tcp->handle, backlog, qrk__tcp_connection_cb);
+    if (r) {
+        qrk_err_t err = {
+                .code = r,
+                .origin = QRK_EO_UV,
+                .target = tcp,
+                .target_type = tcp->type
+        };
+        qrk_err_emit(&err);
+        return r;
+    }
+    return 0;
 }
 
 static void qrk__tcp_alloc_cb (uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)

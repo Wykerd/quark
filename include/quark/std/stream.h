@@ -21,7 +21,8 @@ typedef void (*qrk_stream_write)(qrk_stream_t *stream, qrk_rbuf_t *buf);
     qrk_stream_cb on_write;         \
 	qrk_stream_read_cb on_read; 	\
 	qrk_stream_write write;         \
-    qrk_stream_t *child;
+    qrk_stream_t *child;     		\
+	void *data;
 
 struct qrk_stream_s {
 	QRK_MEMORY_CONTEXT_FIELDS
@@ -38,7 +39,7 @@ typedef struct qrk_loop_s {
 
 #define qrk_loop_def(mctx) \
     {                              \
-        .m_ctx = mctx,            \
+        .m_ctx = (mctx),           \
         .loop = uv_default_loop(), \
         .type = QRK_ET_LOOP        \
     }
